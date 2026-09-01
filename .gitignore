@@ -1,0 +1,23 @@
+.DS_Store
+
+# Codex/agent-local state and evidence
+.omo/
+.omx/
+.codegraph
+
+# macOS/Xcode build output
+DerivedData/
+build/
+*.xcuserstate
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+
+# Owner-local QA evidence
+QA/Evidence/
