@@ -21,7 +21,7 @@ Destructive candidate execution and evidence redaction follow [`HotspotByteFence
 
 **Resolved value:** Keep `com.copylawbot.hotspotbytefence`.
 
-**Resolved distribution policy:** Distribute the v1 artifact directly through a GitHub Release as a Copy App. The default package is a ZIP containing the `.app` and a `SHA-256SUMS` manifest. The default artifact is completely unsigned; ad hoc signing is optional. Developer ID signing, notarization, and Hardened Runtime are not release prerequisites. Every release must include the exact asset SHA-256 and first-launch/Gatekeeper instructions. A release versioning convention remains a packaging input, but it does not block domain, measurement, or candidate-gate implementation.
+**Resolved distribution policy:** Distribute the v1 artifact directly through a GitHub Release as a Copy App. The published package is an unsigned ZIP containing the `.app` and a `SHA-256SUMS` manifest. Before supported use, the user must ad hoc-sign the extracted `.app` locally. This is an installation prerequisite for the supported path and is not Developer ID signing or notarization. Developer ID signing, notarization, and Hardened Runtime are not release prerequisites. Every release must include the exact unsigned asset SHA-256, the canonical local signing procedure, and first-launch/Gatekeeper instructions. The unsigned asset digest must be verified before signing. A locally signed app is a derived artifact; its signature and digest are recorded separately and it does not inherit exact-candidate gate evidence unless that exact signed artifact is tested. A release versioning convention remains a packaging input, but it does not block domain, measurement, or candidate-gate implementation.
 
 ---
 

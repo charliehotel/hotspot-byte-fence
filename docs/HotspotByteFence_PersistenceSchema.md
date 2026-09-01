@@ -147,14 +147,14 @@ identity snapshot used for exact current-network revalidation.
 | `distributionSource` | `githubRelease` | Yes | v1 direct-distribution source |
 | `releaseManifestID` | String or null | Yes | Immutable release input when available |
 | `releaseManifestSHA256` | SHA256Hex or null | Yes | SHA-256 of the canonical external `ReleaseManifestV1`; required with `releaseManifestID` for candidate/release evidence |
-| `releaseAssetSHA256` | SHA256Hex or null | Yes | Exact GitHub asset digest; required before release evidence is accepted |
-| `executableSHA256` | SHA256Hex or null | Yes | Required for candidate/release evidence |
+| `releaseAssetSHA256` | SHA256Hex or null | Yes | Digest of the published unsigned GitHub ZIP asset; required before release evidence is accepted |
+| `executableSHA256` | SHA256Hex or null | Yes | Digest of the exact tested app executable, including its post-signing state when the tested path uses local ad hoc signing |
 | `codeSignatureStatus` | `unsigned`, `adhoc`, or `developerID` | Yes | Actual status; Developer ID is not required |
 | `codeSignatureTeamID` | String or null | Yes | No secret material; normally null for unsigned/ad hoc artifacts |
 | `hardenedRuntimeStatus` | `unavailable`, `enabled`, or `disabled` | Yes | Record actual status; an unsigned artifact must use `unavailable` |
-| `notarizationStatus` | `notApplicable`, `notarized`, `failed`, or `unknown` | Yes | `notApplicable` is the default GitHub unsigned path |
+| `notarizationStatus` | `notApplicable`, `notarized`, `failed`, or `unknown` | Yes | `notApplicable` is the default published unsigned path; record the actual post-signing status when a derived app is tested |
 | `gatekeeperStatus` | `allowed`, `userApproved`, `blocked`, or `notApplicable` | Yes | Exact first-launch result on the target Mac |
-| `quarantineStatus` | `present`, `removed`, `absent`, or `unknown` | Yes | State observed for the tested GitHub asset |
+| `quarantineStatus` | `present`, `removed`, `absent`, or `unknown` | Yes | State observed for the published unsigned asset or the separately identified post-signing artifact |
 | `architecture` | String | Yes | `arm64` for the v1 validation row |
 | `macOSBuild` | String | Yes | Exact build observed at launch |
 | `observedAt` | Instant | Yes | Wall-clock audit time |

@@ -17,7 +17,7 @@ Required companion contracts:
 
 ## 1. Approved Architecture Decision
 
-HBF v1 is a directly distributed GitHub Copy App: a non-sandboxed, `arm64` macOS application that uses public APIs only. The default release artifact is completely unsigned. Ad hoc signing may be used, but Developer ID signing, notarization, and Hardened Runtime are not distribution prerequisites. The exact artifact's signature, Hardened Runtime, notarization, quarantine, and Gatekeeper results are recorded without turning them into mandatory capability claims. HBF does not install a privileged helper or daemon.
+HBF v1 is a directly distributed GitHub Copy App: a non-sandboxed, `arm64` macOS application that uses public APIs only. The published GitHub package is an unsigned ZIP. Before supported use, the user must ad hoc-sign the extracted `.app` locally; this is an installation prerequisite for the supported path. Developer ID signing, notarization, and Hardened Runtime are not distribution prerequisites. The unsigned asset digest is verified before signing, and the post-signing app or executable digest is recorded separately. A locally signed app is a derived artifact and cannot inherit exact-candidate gate evidence unless that exact signed artifact is tested. The exact artifact's signature, Hardened Runtime, notarization, quarantine, and Gatekeeper results are recorded without turning them into mandatory Developer ID capability claims. HBF does not install a privileged helper or daemon.
 
 This posture is intentional. Strong blocking requires an administrator-authorized CoreWLAN configuration commit, while Authorization Services is unavailable to an App Sandbox process. `SFAuthorization` is created only for an explicit blocking authorization action, remains in memory, and is invalidated when it is no longer needed. A previous authorization result is audit history only; it cannot authorize a later process.
 
@@ -30,6 +30,7 @@ The initial validation target is macOS 26.6.2 build 25G83 on `arm64`. The macOS 
 - All network and clock adapters can fail and must return explicit results.
 - The exact artifact declares either strong-blocking-capable or measurement-only behavior in immutable build metadata or its release manifest.
 - Candidate approval is a release-process record bound to the exact executable and GitHub asset digest, with signature status recorded when present. It is not a mutable user preference.
+- Local ad hoc signing is a supported-installation prerequisite. Published unsigned-asset identity, post-signing app identity, and exact-candidate gate evidence are recorded as separate values; local signing does not grant an entitlement or release approval.
 - Operator validation mode is a non-persisted launch context for the same exact GitHub candidate artifact. It changes test-facing status and confirmation requirements, not production logic.
 
 ### 1.2 Non-goals
@@ -276,10 +277,10 @@ Every byte count and revision that can exceed JSON's exact integer range is enco
 | Administrator authorization | Explicit `SFAuthorization`, memory-only, least privilege | Measurement may continue; blocking not guaranteed |
 | Wi-Fi preference mutation | Public CoreWLAN only, reversible transaction first | No safe round-trip: no write |
 | Local state | Application Support, owner-only permissions | Required write failure: global recovery |
-| Login launch | `SMAppService.mainApp` | Disclose downtime gap |
+| Login launch | `SMAppService.mainApp` after local ad hoc signing and user approval | If signing or approval is unavailable, run only while open and disclose the downtime gap |
 | Notifications | `UNUserNotificationCenter` | Persistent in-app warning remains |
 
-The build must carry `NSLocationUsageDescription` for macOS SSID/BSSID identity access, with Korean and English localized purpose strings. The `com.apple.wifi.events` entitlement is not assumed to be available: the unsigned GitHub candidate defaults to polling and public notifications. If an event path requires the entitlement and the exact artifact does not have it, HBF must not claim entitlement-backed event behavior. Entitlement, Info.plist, actual Hardened Runtime/signature/notarization status, App Sandbox absence, release manifest, Gatekeeper result, and report checks are listed in [`HotspotByteFence_VerificationTraceability.md`](HotspotByteFence_VerificationTraceability.md).
+The build must carry `NSLocationUsageDescription` for macOS SSID/BSSID identity access, with Korean and English localized purpose strings. The published GitHub asset is unsigned, and supported user setup requires local ad hoc signing before first launch. The `com.apple.wifi.events` entitlement is not assumed to be available: the candidate defaults to polling and public notifications unless the exact tested artifact proves the event path. If an event path requires the entitlement and the exact artifact does not have it, HBF must not claim entitlement-backed event behavior. Entitlement, Info.plist, actual Hardened Runtime/signature/notarization status, App Sandbox absence, release manifest, Gatekeeper result, and report checks are listed in [`HotspotByteFence_VerificationTraceability.md`](HotspotByteFence_VerificationTraceability.md).
 
 ### 9.1 Authorization boundary
 
@@ -308,6 +309,8 @@ strongObservationRequirement: eventBacked-30s-awake-v1
 The manifest is canonical UTF-8 JSON with sorted keys and no insignificant whitespace. HBF refuses to start a measurement or blocking engine when the manifest is malformed, its bundle identifier or architecture does not match the process, its `compiledMode` disagrees with the compile-time constant, or its counter/observation source identifiers are unknown. `BuildManifestV1` is an artifact description, not an authorization or a release approval token.
 
 The external `ReleaseManifestV1` is maintained by the release process. Its exact schema is fixed below:
+
+In this schema, `releaseAssetSHA256` identifies the published unsigned ZIP, while `executableSHA256` identifies the exact executable used for the candidate or release test. When the tested path includes local ad hoc signing, the latter is the post-signing executable digest and the signing procedure and actual signature state must be recorded with the evidence.
 
 ```text
 ReleaseManifestV1
@@ -349,6 +352,8 @@ The artifact lifecycle is therefore:
 3. Bind the candidate's executable, embedded manifest, source revision, and asset digest to the F/R reports.
 4. Approve the unchanged artifact as `strongBlockingCapable` only when all required gates pass, or publish it as `measurementOnly` only when identity and counter gates pass and the strong-blocking gate fails.
 5. Never let an external report, mutable store, user preference, or signature status promote a `measurementOnly` executable.
+
+When local user signing is part of the supported installation path, candidate evidence must bind both the published unsigned asset digest and the exact post-signing app or executable digest, together with the canonical signing procedure and its entitlements. A user-resigned copy without matching evidence is a derived local artifact and cannot inherit a strong-blocking or measurement-capable release claim solely from the unsigned GitHub asset.
 
 The operator-validation launch context is process-local, explicit, and never persisted. It changes warnings and confirmation requirements only. It does not bypass capability checks, authorization, observation-quality rules, or transaction safety.
 

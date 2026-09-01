@@ -16,7 +16,7 @@ This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an impl
 | `D-` | Domain test | Deterministic reducer/engine harness with injected clock, identity, counter, persistence, notification, disconnector spies |
 | `I-` | Adapter integration test | macOS API adapter exercised in a local unsigned or development-signed build; not a release capability pass |
 | `UI-` | UI and accessibility test | Menu bar/settings app with accessibility identifiers, Korean/English String Catalogs, Light/Dark captures |
-| `F-` | GitHub-candidate feasibility gate | Exact non-sandboxed GitHub artifact; unsigned or ad hoc signed is allowed; operator workflow where destructive |
+| `F-` | GitHub-candidate feasibility gate | Exact non-sandboxed GitHub release path; published unsigned asset plus the canonical post-download ad hoc-signed app when the case requires signing; operator workflow where destructive |
 | `R-` | Strong-blocking release gate | Exact unchanged candidate on each supported macOS build |
 | `REP-` | Report/schema validator | Machine-checkable local evidence and redacted report validation |
 
@@ -37,7 +37,7 @@ This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an impl
 | `FX-Observation-001` | Event-backed callback, entitlement absent, polling fallback, lifecycle-only input, one-second cadence, two-second gap, 30-second awake window, reconnection classification | AC-09, AC-41, AC-64, AC-73 |
 | `FX-Notification-001` | Notification grant/deny, mute expiry during sleep, once-per-cycle success, five-minute failure throttle | AC-21, AC-22, AC-42, AC-43, AC-60 |
 | `FX-UI-001` | Accessibility identifiers, state snapshots, Korean/English string coverage, Light/Dark screenshots, truncation checks | AC-03~07, AC-20, AC-23~25, AC-48, AC-52, AC-69 |
-| `FX-Release-001` | Actual signature/runtime/notarization data when present, entitlements, Info.plist, GitHub release manifest, asset hash, Gatekeeper/quarantine result, support matrix row, local/redacted reports | AC-63, AC-72 |
+| `FX-Release-001` | Published unsigned asset hash, canonical local signing procedure, post-signing app/executable hash and actual signature state, entitlements, Info.plist, GitHub release manifest, Gatekeeper/quarantine result, support matrix row, local/redacted reports | AC-63, AC-72 |
 
 ### 2.1 Canonical implementation and evidence surfaces
 
@@ -195,7 +195,8 @@ Release and candidate verification must inspect these artifacts before any funct
 | Supported architecture | `arm64` for v1 unless additional proof is added |
 | Embedded `BuildManifestV1` | Canonical manifest fields, compile-time capability constant, manifest SHA-256, bundle/architecture/mode/source agreement |
 | External `ReleaseManifestV1` | Exact schema in `HotspotByteFence_TechnicalDesign.md` Section 10: schema/version/id/status, candidate hashes, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps; its canonical digest is recorded as `releaseManifestSHA256` |
+| Local signing record | Published unsigned asset SHA-256, exact ad hoc signing procedure, post-signing app/executable SHA-256, actual signature state, and any post-signing entitlement inspection |
 | Local evidence | Full non-shared evidence with local-sensitive identifiers allowed |
 | Redacted report | Shareable derivative with hashes/redactions and no prohibited data |
 
-The `com.apple.wifi.events` entitlement is not assumed for the GitHub path. The default candidate implementation uses one-second polling plus public notifications, while strong-blocking suppression requires event-backed observation under F-12. If an event path requires the entitlement and the exact artifact does not have it, F-12 records the absence, suppression remains `Unverified`, and the artifact can proceed only as measurement-only when identity and counter gates pass.
+The `com.apple.wifi.events` entitlement is not assumed for the GitHub path. The published asset is unsigned and supported user setup uses the canonical local ad hoc-signing procedure in `README.md`; that signature step does not itself grant an entitlement. The default candidate implementation uses one-second polling plus public notifications, while strong-blocking suppression requires event-backed observation under F-12. If an event path requires the entitlement and the exact tested artifact does not have it, F-12 records the absence, suppression remains `Unverified`, and the artifact can proceed only as measurement-only when identity and counter gates pass.

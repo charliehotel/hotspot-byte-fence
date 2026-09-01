@@ -5,7 +5,7 @@
 **Current verdict:** `PENDING`  
 **Scope:** Initial `arm64` validation target only
 
-This record distinguishes API discovery from exact GitHub-candidate proof. A compiler check, Swift interpreter run, mock adapter, or helper artifact that is different from the exact GitHub release asset is not a capability-gate pass. The GitHub candidate may be completely unsigned or ad hoc signed; Developer ID signing, notarization, and Hardened Runtime are not prerequisites.
+This record distinguishes API discovery from exact GitHub-candidate proof. A compiler check, Swift interpreter run, mock adapter, or helper artifact that is different from the exact GitHub release path is not a capability-gate pass. The published GitHub asset is an unsigned ZIP, and supported user setup signs the extracted app locally with the canonical procedure in `README.md`. A gate run must identify whether it exercised the published unsigned asset or the post-signing app, bind their digests separately, and record the actual signature state. Developer ID signing, notarization, and Hardened Runtime are not prerequisites.
 
 Required design and evidence companions:
 
@@ -26,7 +26,7 @@ Required design and evidence companions:
 | Architecture | `arm64` |
 | Xcode SDK | macOS 26.5 |
 | Swift | 6.3.3 |
-| Distribution posture | GitHub direct Copy App, non-sandboxed; unsigned by default; ad hoc signing optional; Developer ID/notarization/Hardened Runtime recorded if present but not required |
+| Distribution posture | GitHub direct Copy App, non-sandboxed; unsigned package; local user-side ad hoc signing required before supported use; Developer ID/notarization/Hardened Runtime recorded if present but not required |
 | App Sandbox | Disabled by approved v1 design |
 
 This environment is the only initial validation entry. macOS 13.0 remains a deployment floor and has no support claim.
@@ -52,7 +52,7 @@ Strong-blocking candidate integration may proceed only when F-01 through F-11 an
 
 | ID | Scenario | Required evidence | Status |
 |---|---|---|---|
-| F-01 | Distribution posture | Exact GitHub asset SHA-256, App Sandbox absence, actual unsigned/ad hoc/Developer ID status, actual Hardened Runtime status, quarantine state, and Gatekeeper launch outcome are recorded; Developer ID is not required | `PENDING` |
+| F-01 | Distribution posture | Exact published unsigned asset SHA-256, canonical local ad hoc-signing procedure, post-signing app/executable digest and actual signature status when applicable, App Sandbox absence, actual Hardened Runtime status, quarantine state, and Gatekeeper launch outcome are recorded; Developer ID is not required | `PENDING` |
 | F-02 | Location granted | Exact interface name, nonempty SSID bytes, and canonical BSSID are returned without storing coordinates | `PENDING` |
 | F-03 | Location denied/revoked | Identity-dependent measurement and blocking stop with the required state | `PENDING` |
 | F-04 | Candidate counter read | `NET_RT_IFLIST2` returns checked 64-bit RX/TX for the selected interface in the exact GitHub candidate | `PENDING` |
@@ -156,7 +156,7 @@ The canonical manifest is UTF-8 JSON with sorted keys and no insignificant white
 
 ### 6.2 External `ReleaseManifestV1`
 
-The external `ReleaseManifestV1` uses the exact schema in Section 10 of `HotspotByteFence_TechnicalDesign.md`: schema/version/id/status, candidate hashes, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps. Its canonical JSON digest is recorded as `releaseManifestSHA256` in candidate evidence. The release process compares every value with the local candidate evidence before approval.
+The external `ReleaseManifestV1` uses the exact schema in Section 10 of `HotspotByteFence_TechnicalDesign.md`: schema/version/id/status, published unsigned asset and tested post-signing candidate hashes, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps. Its canonical JSON digest is recorded as `releaseManifestSHA256` in candidate evidence. The release process compares every value with the local candidate evidence before approval. A user-resigned app without a matching post-signing digest is a derived artifact and cannot inherit the candidate verdict.
 
 `strongBlockingCapable` is distributable only when F-01 through F-12, the identity and counter capability gates, and R-01 through R-15 pass for the exact unchanged artifact. `measurementOnly` is distributable only when identity and counter capability gates pass and the strong-blocking gate fails. An external report, a mutable store, a user preference, or a signature status cannot promote `measurementOnly` to strong blocking. A candidate that is not yet approved is not a protected user release and must be exercised only through the operator-validation workflow.
 
@@ -186,7 +186,7 @@ Before each run, the operator records the role availability, current network ide
 - Actual code signature status and designated requirement, if a signature exists
 - Hardened Runtime result: `enabled`, `disabled`, or `unavailable`
 - App Sandbox absence result
-- Notarization and stapling status, with `notApplicable` accepted for the unsigned GitHub path
+- Notarization and stapling status, with `notApplicable` accepted for the published unsigned GitHub path and the post-signing status recorded when a derived app is tested
 - Quarantine attribute and Gatekeeper launch/approval result
 - Architecture
 - Exact macOS version and build

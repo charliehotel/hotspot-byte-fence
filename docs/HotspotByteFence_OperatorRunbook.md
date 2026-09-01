@@ -6,6 +6,8 @@
 
 This runbook is the mandatory procedure for F-06 through F-12 and R-01 through R-15. It prevents destructive Wi-Fi actions from being mistaken for ordinary automated tests and defines the evidence needed for a candidate or release verdict.
 
+For this v1 policy, the operator verifies the published unsigned asset SHA-256 before extracting or signing it, applies the exact local ad hoc-signing procedure published in `README.md`, and records the resulting app or executable SHA-256 and actual signature state separately. The post-signing artifact is the exact candidate only when the gate record binds that digest; an arbitrary user-resigned copy cannot inherit a candidate or release verdict.
+
 ## 1. Safety rules
 
 - Run only on the operator-approved Mac and test networks. Do not use a production hotspot, a network whose interruption could cause data loss, or a machine with unsaved network-dependent work.
