@@ -3,7 +3,7 @@
 **Version:** 0.3
 **Date:** 2026-09-01  
 **Normative source:** [`HotspotByteFence_PRD.md`](HotspotByteFence_PRD.md)  
-**Implementation status:** Initial typed persistence foundation is implemented under `Sources/HotspotByteFenceCore` with canonical JSON, owner-only permissions, LKG validation, journal phases, digest checks, explicit recovery results, and initial typed installation-marker/tombstone cross-file transitions. The complete `StoreEnvelopeV1`, full profile-reference purge validation, command ledger, and preference archive remain pending.
+**Implementation status:** Initial typed persistence foundation is implemented under `Sources/HotspotByteFenceCore` with canonical JSON, owner-only permissions, LKG validation, journal phases, digest checks, explicit recovery results, installation-marker/tombstone cross-file transitions, and the platform-independent `CWConfigurationArchiveV1` canonical archive/fingerprint/replay primitives. The complete `StoreEnvelopeV1`, CoreWLAN SDK adapter/read-back path, full profile-reference purge validation, command ledger, and preference transaction record remain pending.
 
 This document defines the concrete v1 logical store. It must be implemented with typed Swift `Codable` records or stricter equivalent parsers. Ad hoc string manipulation is not acceptable at the persistence boundary. Real-Mac candidate execution and evidence handling follow [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md).
 

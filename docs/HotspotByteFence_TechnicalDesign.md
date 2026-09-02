@@ -3,7 +3,7 @@
 **Version:** 0.3
 **Date:** 2026-09-01  
 **Product baseline:** `HotspotByteFence_PRD.md`  
-**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation, including installation-marker/tombstone cross-file transitions, are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
+**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation, including installation-marker/tombstone cross-file transitions and platform-independent CoreWLAN configuration archive primitives, are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
 
 Required companion contracts:
 
