@@ -235,7 +235,7 @@ public struct PreferenceTransactionRecord: Codable, Equatable, Sendable {
         }
     }
 
-    private enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey {
         case transactionID
         case profileID
         case targetScope

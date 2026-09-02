@@ -3,7 +3,7 @@
 **Version:** 0.3
 **Date:** 2026-09-01  
 **Product baseline:** `HotspotByteFence_PRD.md`  
-**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation, including installation-marker/tombstone cross-file transitions, platform-independent CoreWLAN configuration archive primitives, and validated preference transaction lifecycle states, are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
+**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation, including installation-marker/tombstone cross-file transitions, platform-independent CoreWLAN configuration archive primitives, validated preference transaction lifecycle states, and the staged `StoreEnvelopeV1` foundation, are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
 
 Required companion contracts:
 
@@ -254,6 +254,8 @@ StoreEnvelope
 Every byte count and revision that can exceed JSON's exact integer range is encoded as a canonical decimal string and decoded with checked conversion. Unknown fields may be preserved only when the version-specific migration explicitly supports them; an unknown future schema enters recovery.
 
 `ProfileRecord`, `PreferenceTransaction`, `CommandResultRecord`, `notificationState`, `events`, `tombstoneDigest`, and `integrity` are not placeholder implementation choices. Their v1 fields, required/nullable status, enum values, archive format, fingerprint algorithm id, transaction ordering, event retention, and privacy/redaction classes are fixed in [`HotspotByteFence_PersistenceSchema.md`](HotspotByteFence_PersistenceSchema.md).
+
+The current `StoreEnvelopeV1` implementation is a staged persistence foundation. It currently carries the implemented revision, installation, language, tombstone-digest, and preference-transaction fields; it must not be treated as a complete logical store until the remaining typed records and cross-record invariants are implemented.
 
 ### 8.3 Recovery and deletion
 

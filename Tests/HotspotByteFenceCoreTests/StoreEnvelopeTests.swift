@@ -1,0 +1,167 @@
+import Foundation
+import XCTest
+@testable import HotspotByteFenceCore
+
+final class StoreEnvelopeTests: XCTestCase {
+    func testEnvelopeRoundTripsFoundationFieldsAndUsesExplicitNulls() throws {
+        let transaction = try makeTransaction()
+        let envelope = try makeEnvelope(preferenceTransactions: [transaction])
+
+        let encoded = try StoreJSONCodec.encode(envelope)
+        let json = String(decoding: encoded, as: UTF8.self)
+
+        XCTAssertEqual(try StoreJSONCodec.decode(StoreEnvelopeV1.self, from: encoded), envelope)
+        XCTAssertTrue(json.contains("\"previousGoodRevision\":null"))
+        XCTAssertTrue(json.contains("\"selectedProfileID\":null"))
+        XCTAssertTrue(json.contains("\"lastError\":null"))
+        XCTAssertTrue(json.contains("\"storeRevision\":\"2\""))
+        XCTAssertEqual(envelope.storeRevision, DecimalUInt64(rawValue: 2))
+        XCTAssertEqual(envelope.preferenceTransactions, [transaction])
+    }
+
+    func testEnvelopeRejectsInvalidRevisionDigestAndDuplicateTransaction() throws {
+        let transaction = try makeTransaction()
+        let futureSchema = String(
+            decoding: try StoreJSONCodec.encode(makeEnvelope(preferenceTransactions: [transaction])),
+            as: UTF8.self
+        ).replacingOccurrences(of: "\"schemaVersion\":1", with: "\"schemaVersion\":2")
+
+        XCTAssertThrowsError(
+            try StoreJSONCodec.decode(
+                StoreEnvelopeV1.self,
+                from: Data(futureSchema.utf8)
+            )
+        ) { error in
+            XCTAssertEqual(error as? StoreEnvelopeValidationError, .unsupportedSchemaVersion)
+        }
+        XCTAssertThrowsError(
+            try makeEnvelope(
+                previousGoodRevision: DecimalUInt64(rawValue: 2),
+                preferenceTransactions: [transaction]
+            )
+        ) { error in
+            XCTAssertEqual(error as? StoreEnvelopeValidationError, .invalidRevision)
+        }
+        XCTAssertThrowsError(
+            try makeEnvelope(
+                preferenceTransactions: [transaction],
+                tombstoneDigest: String(repeating: "A", count: 64)
+            )
+        ) { error in
+            XCTAssertEqual(error as? StoreEnvelopeValidationError, .invalidTombstoneDigest)
+        }
+        XCTAssertThrowsError(
+            try makeEnvelope(preferenceTransactions: [transaction, transaction])
+        ) { error in
+            XCTAssertEqual(error as? StoreEnvelopeValidationError, .duplicateTransactionID)
+        }
+    }
+
+    func testEnvelopePersistsTransactionsThroughJournalAndLKG() throws {
+        let installationID = try XCTUnwrap(UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"))
+        let directory = try temporaryDirectory()
+        let store = try JournaledStateStore<StoreEnvelopeV1>(
+            directory: directory,
+            installationID: installationID
+        )
+        let transaction = try makeTransaction()
+        let envelope = try makeEnvelope(
+            installationID: installationID,
+            preferenceTransactions: [transaction]
+        )
+
+        try store.commitEnvelope(envelope, operation: .preferencePrepare)
+
+        XCTAssertEqual(try store.load(), .loaded(envelope))
+        XCTAssertEqual(try store.decodeLKG(), envelope)
+        XCTAssertEqual(
+            try Data(contentsOf: store.paths.canonicalURL),
+            try StoreJSONCodec.encode(envelope)
+        )
+        let journal = try XCTUnwrap(try store.readJournalIfPresent())
+        XCTAssertEqual(journal.operation, .preferencePrepare)
+        XCTAssertEqual(journal.targetStoreRevision, envelope.storeRevision)
+
+        let mismatched = try makeEnvelope(
+            installationID: UUID(),
+            preferenceTransactions: [transaction]
+        )
+        XCTAssertThrowsError(try store.commitEnvelope(mismatched, operation: .preferenceApplied)) { error in
+            XCTAssertEqual(error as? PersistenceError, .validationFailed)
+        }
+    }
+
+    func testEnvelopeDecodeRejectsTamperedPreferenceTransaction() throws {
+        let envelope = try makeEnvelope(preferenceTransactions: [try makeTransaction()])
+        let encoded = try StoreJSONCodec.encode(envelope)
+        let tampered = String(decoding: encoded, as: UTF8.self).replacingOccurrences(
+            of: envelope.preferenceTransactions[0].originalFingerprint,
+            with: String(repeating: "0", count: 64)
+        )
+
+        XCTAssertThrowsError(
+            try StoreJSONCodec.decode(
+                StoreEnvelopeV1.self,
+                from: Data(tampered.utf8)
+            )
+        ) { error in
+            XCTAssertEqual(error as? StoreEnvelopeValidationError, .invalidTransaction)
+        }
+    }
+
+    private func makeEnvelope(
+        storeRevision: DecimalUInt64 = DecimalUInt64(rawValue: 2),
+        previousGoodRevision: DecimalUInt64? = nil,
+        installationID: UUID = UUID(),
+        hasCompletedProfile: Bool = true,
+        selectedProfileID: UUID? = nil,
+        languageOverride: StoreLanguageOverrideV1 = .ko,
+        preferenceTransactions: [PreferenceTransactionRecord] = [],
+        tombstoneDigest: String = String(repeating: "0", count: 64)
+    ) throws -> StoreEnvelopeV1 {
+        try StoreEnvelopeV1(
+            storeRevision: storeRevision,
+            previousGoodRevision: previousGoodRevision,
+            installationID: installationID,
+            hasCompletedProfile: hasCompletedProfile,
+            selectedProfileID: selectedProfileID,
+            languageOverride: languageOverride,
+            preferenceTransactions: preferenceTransactions,
+            tombstoneDigest: tombstoneDigest
+        )
+    }
+
+    private func makeTransaction(
+        transactionID: UUID = UUID()
+    ) throws -> PreferenceTransactionRecord {
+        let original = CWConfigurationArchiveV1(
+            networkProfiles: [
+                try CWNetworkProfileArchiveV1(
+                    ssidHex: "0102",
+                    securityRawValue: DecimalUInt64(rawValue: 1)
+                )
+            ],
+            flags: CWConfigurationArchiveFlagsV1(
+                requireAdministratorForAssociation: true,
+                requireAdministratorForIBSSMode: false,
+                requireAdministratorForPower: true,
+                rememberJoinedNetworks: true
+            )
+        )
+        return try PreferenceTransactionRecord.prepared(
+            transactionID: transactionID,
+            profileID: UUID(),
+            targetScope: try InterfaceSSIDScopeRecord(interfaceName: "en0", ssidHex: "0102"),
+            originalArchive: original,
+            intendedArchive: original.removingProfiles(matching: try SSID(hex: "0102")),
+            preparedAt: Date(timeIntervalSince1970: 10)
+        )
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hbf-envelope-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}
