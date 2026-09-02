@@ -8,6 +8,8 @@ public struct StorePaths: Equatable, Sendable {
     public let directory: URL
     public let canonicalURL: URL
     public let lkgURL: URL
+    public let installationURL: URL
+    public let tombstonesURL: URL
     public let journalURL: URL
 
     public init(directory: URL) {
@@ -15,6 +17,8 @@ public struct StorePaths: Equatable, Sendable {
         self.directory = normalizedDirectory
         self.canonicalURL = normalizedDirectory.appendingPathComponent("state.json")
         self.lkgURL = normalizedDirectory.appendingPathComponent("state.lkg.json")
+        self.installationURL = normalizedDirectory.appendingPathComponent("installation.json")
+        self.tombstonesURL = normalizedDirectory.appendingPathComponent("tombstones.json")
         self.journalURL = normalizedDirectory.appendingPathComponent("commit-journal.json")
     }
 }
@@ -121,6 +125,29 @@ public struct CommitJournalV1: Codable, Equatable, Sendable {
             updatedAt: updatedAt
         )
     }
+
+    public func recording(
+        canonicalDigest: String? = nil,
+        lkgDigest: String? = nil,
+        installationDigest: String? = nil,
+        tombstoneDigest: String? = nil,
+        updatedAt: Date = Date()
+    ) throws -> CommitJournalV1 {
+        guard phase == .purgeInProgress else {
+            throw PersistenceError.invalidPhaseTransition
+        }
+        return CommitJournalV1(
+            installationID: installationID,
+            operation: operation,
+            targetStoreRevision: targetStoreRevision,
+            phase: phase,
+            canonicalDigest: canonicalDigest ?? self.canonicalDigest,
+            lkgDigest: lkgDigest ?? self.lkgDigest,
+            installationDigest: installationDigest ?? self.installationDigest,
+            tombstoneDigest: tombstoneDigest ?? self.tombstoneDigest,
+            updatedAt: updatedAt
+        )
+    }
 }
 
 public enum PersistenceRecoveryReason: String, Equatable, Sendable {
@@ -128,6 +155,8 @@ public enum PersistenceRecoveryReason: String, Equatable, Sendable {
     case canonicalDecodeFailure
     case lkgMissing
     case lkgDecodeFailure
+    case installationDecodeFailure
+    case tombstoneDecodeFailure
     case journalDecodeFailure
     case incompleteJournal
     case integrityFailure
@@ -146,6 +175,9 @@ public enum PersistenceError: Error, Equatable, Sendable {
     case fileCreationFailed
     case writeFailed
     case validationFailed
+    case invalidDigest
+    case duplicateTombstone
+    case invalidTombstoneState
     case invalidPhaseTransition
     case unsupportedOperation
 }
