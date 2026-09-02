@@ -1,11 +1,11 @@
 # Hotspot Byte Fence (HBF) — Verification Traceability Matrix
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Normative source:** [`HotspotByteFence_PRD.md`](HotspotByteFence_PRD.md)  
-**Implementation status:** Test and gate design only. No Swift source, Xcode project, fixture, harness, app bundle, or GitHub candidate artifact exists in this workspace.
+**Implementation status:** The SwiftPM core source, unit-test surface, and initial `FX-Counter-001` fixture exist under `Sources/HotspotByteFenceCore` and `Tests/HotspotByteFenceCoreTests`. The full Xcode app, runtime harness, candidate runner, app bundle, and GitHub candidate artifact do not exist yet; F/R and complete D/I/UI/REP evidence remain pending.
 
-This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an implementation-facing test or GitHub-candidate gate. It does not claim that any test has passed. Real-Mac destructive execution follows [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md).
+This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an implementation-facing test or GitHub-candidate gate. Local core test results are reported separately from F/R evidence; passing them does not credit a candidate or release gate. Real-Mac destructive execution follows [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md).
 
 ---
 
@@ -26,10 +26,10 @@ This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an impl
 
 | Fixture/oracle | Contents | Blocks |
 |---|---|---|
-| `FX-Counter-001` | RX/TX increments, regression, reset, parse failure, interface-index mismatch, UInt64 overflow, reset-straddling sample | AC-01, AC-02, AC-34~37, AC-53, AC-56, AC-68, AC-76 |
-| `FX-Identity-001` | SSID hex corpus, BSSID corpus, interface names, unknown/new/ambiguous/duplicate/shared cases | AC-27~32, AC-62, AC-65, AC-80 |
+| `FX-Counter-001` | RX/TX increments, regression, reset, parse failure, mixed records, `ifm_msglen` bounds, truncation, zero-length and unknown-layout records, unaligned input, duplicate target index, name/index mismatch, UInt64 overflow, reset-straddling sample | AC-01, AC-02, AC-34~37, AC-53, AC-56, AC-68, AC-76 |
+| `FX-Identity-001` | SSID hex corpus, BSSID corpus, interface names, coherent double-read snapshots, getter/event race, unknown/new/ambiguous/duplicate/shared cases | AC-27~32, AC-62, AC-65, AC-80 |
 | `FX-Clock-001` | Reset-day calendar corpus, DST edge, time-zone change, wall/monotonic divergence, sleep/wake/relaunch | AC-13~18, AC-35, AC-44, AC-49, AC-50, AC-56, AC-57, AC-71, AC-78 |
-| `FX-Persistence-001` | Valid/corrupt/missing canonical and LKG stores, unknown schema, migration failure, marker repair, tombstone interruption, flush failure | AC-19, AC-33, AC-37, AC-38, AC-70, AC-74, AC-77, AC-79 |
+| `FX-Persistence-001` | Valid/corrupt/missing canonical and LKG stores, unknown schema, migration failure, marker repair, `CommitJournalV1` phases, required-but-missing journal, every multi-file crash cut point, revision/digest mismatch recovery, tombstone interruption, flush failure | AC-19, AC-33, AC-37, AC-38, AC-70, AC-74, AC-77, AC-79 |
 | `FX-CoreWLAN-001` | Target-present, target-absent, duplicate security profiles, unrelated preferred networks, external user mutation | AC-08~10, AC-40, AC-41, AC-54, AC-55, AC-64, AC-70, AC-73~75, AC-79 |
 | `FX-Permission-001` | Location granted, denied, restricted, revoked, restored, and manual-identity boundary without coordinates | AC-67 |
 | `FX-Authorization-001` | Explicit authorization success, denial, cancellation, relaunch non-interactive check, exact right/flags, restoration authorization need | AC-27, AC-39, AC-63, AC-79 |
@@ -37,21 +37,23 @@ This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an impl
 | `FX-Observation-001` | Event-backed callback, entitlement absent, polling fallback, lifecycle-only input, one-second cadence, two-second gap, 30-second awake window, reconnection classification | AC-09, AC-41, AC-64, AC-73 |
 | `FX-Notification-001` | Notification grant/deny, mute expiry during sleep, once-per-cycle success, five-minute failure throttle | AC-21, AC-22, AC-42, AC-43, AC-60 |
 | `FX-UI-001` | Accessibility identifiers, state snapshots, Korean/English string coverage, Light/Dark screenshots, truncation checks | AC-03~07, AC-20, AC-23~25, AC-48, AC-52, AC-69 |
-| `FX-Release-001` | Published unsigned asset hash, canonical local signing procedure, post-signing app/executable hash and actual signature state, entitlements, Info.plist, GitHub release manifest, Gatekeeper/quarantine result, support matrix row, local/redacted reports | AC-63, AC-72 |
+| `FX-Release-001` | Published unsigned asset hash, canonical local signing procedure, tested app-bundle/executable hashes using `hbf-app-bundle-v1-sha256` and post-signing values when applicable, actual signature state, entitlements, Info.plist, GitHub release manifest, Gatekeeper/quarantine result, support matrix row, operator-validation context/status projection, local/redacted reports | AC-63, AC-72 |
 
 ### 2.1 Canonical implementation and evidence surfaces
 
 | Surface | Required path or command | Pass oracle |
 |---|---|---|
-| Domain tests | `Tests/HotspotByteFenceTests/Domain/` and `xcodebuild test -scheme HotspotByteFence -only-testing:HotspotByteFenceTests` | All `D-*` cases pass with injected adapters and no system side effect |
+| Domain tests | `Tests/HotspotByteFenceCoreTests/` and `swift test` | Implemented core cases pass with deterministic inputs and no system side effect; full `D-*` coverage remains pending |
+| Read-only counter probe | `swift run HotspotByteFence --probe-counter <interface>` | The current macOS returns checked `UInt64` RX/TX values through `NET_RT_IFLIST2`; this is local adapter evidence, not an F-04/F-05 candidate pass |
+| Read-only identity probe | `swift run HotspotByteFence --probe-identity` | Interfaces are enumerated without printing SSID/BSSID; unavailable identity remains unavailable and no network action occurs |
 | Adapter tests | `Tests/HotspotByteFenceTests/Adapters/` and `xcodebuild test -scheme HotspotByteFence -only-testing:HotspotByteFenceTests/Adapters` | All `I-*` cases pass on the selected SDK; this does not credit F/R |
 | UI tests | `Tests/HotspotByteFenceUITests/` and `xcodebuild test -scheme HotspotByteFence -only-testing:HotspotByteFenceUITests` | Accessibility identifiers, state snapshots, localization, and appearance checks pass |
-| Fixture assets | `Tests/Fixtures/HotspotByteFence/` | Fixture files validate against the typed fixture schema and expected negative cases are explicit |
+| Fixture assets | `Tests/HotspotByteFenceCoreTests/Fixtures/HotspotByteFence/` | The initial counter fixture validates the typed parser oracle; the remaining fixture families and negative corpus are pending |
 | Report validator | `Scripts/validate-hbf-report` | Invalid schema, prohibited data, missing digest, or inconsistent verdict is rejected |
-| Candidate runner | `Scripts/hbf-gate-run` | It records the exact candidate, manifest, topology, oracle, and operator confirmation without synthesizing results |
+| Candidate runner | `Scripts/hbf-gate-run` | It records the exact candidate, manifest, topology, oracle, and operator confirmation without synthesizing results; it launches destructive cases only with a matching process-local `OperatorValidationContextV1`, and the candidate never projects `StrongBlockingReady` in that lifecycle |
 | Real-Mac evidence | `QA/Evidence/<applicationVersion>/<macOSBuild>/<runID>/` | Local evidence and redacted report are both present and hash-bound to the candidate |
 
-Until these paths and commands exist, `D`, `I`, `UI`, `F`, `R`, and `REP` statuses remain unimplemented or pending; a row cannot be marked passed from a prose fixture description.
+The remaining Xcode, full adapter, UI, report-validator, candidate-runner, and real-Mac evidence paths do not yet exist. Their `I`, `UI`, `F`, `R`, and `REP` statuses remain unimplemented or pending; a row cannot be marked passed from a prose fixture description or from the local read-only probes.
 
 ### 2.2 Status semantics
 
@@ -128,7 +130,7 @@ The `Current status` column is an aggregate planning status, not runtime evidenc
 | AC-63 | Blocking release gate outcome | `REP-REL-001`, `F-01` through `F-12`, `R-01` through `R-15` | `FX-Release-001` | Gate pending |
 | AC-64 | Preference restoration observation | `D-PREF-002`, `F-12`, `R-10`, `R-11` | `FX-CoreWLAN-001`, `FX-Observation-001` | Gate pending |
 | AC-65 | Shared interface-and-SSID capability boundary | `D-PROFILE-005`, `R-03` | `FX-Identity-001`, `FX-CoreWLAN-001` | Gate pending |
-| AC-66 | Multiple resolved target profiles | `D-IDENT-005`, `UI-STATE-005` | `FX-Identity-001` | Not implemented |
+| AC-66 | Multiple resolved target profiles | `D-IDENT-005`, `UI-STATE-005` | `FX-Identity-001`, `T3` topology role | Not implemented |
 | AC-67 | Identity permission boundary | `D-PERM-001`, `F-02`, `F-03` | `FX-Permission-001` | Gate pending |
 | AC-68 | Counter source and width | `I-COUNTER-001`, `F-04`, `D-MEAS-009` | `FX-Counter-001` | Gate pending |
 | AC-69 | Compositional profile state | `D-STATE-002`, `UI-STATE-006` | `FX-UI-001` | Not implemented |
@@ -143,7 +145,7 @@ The `Current status` column is an aggregate planning status, not runtime evidenc
 | AC-78 | Lifecycle clock boundaries | `D-CLOCK-004`, `UI-LIFE-004` | `FX-Clock-001` | Not implemented |
 | AC-79 | Eligibility and build-mode transitions | `D-ENF-010`, `D-PREF-006`, `R-15` | `FX-CoreWLAN-001`, `FX-Release-001` | Gate pending |
 | AC-80 | Manual identity grammar | `D-PROFILE-006`, `UI-CMD-010` | `FX-Identity-001` | Not implemented |
-| AC-81 | State scope and counter-gate precedence | `D-STATE-003`, `REP-REL-003` | `FX-Counter-001`, `FX-Release-001` | Not implemented |
+| AC-81 | State scope and counter-gate precedence | `D-STATE-003`, `F-04`, `F-05`, `REP-REL-003` | `FX-Counter-001`, `FX-Release-001` | Not implemented |
 
 ---
 
@@ -151,18 +153,18 @@ The `Current status` column is an aggregate planning status, not runtime evidenc
 
 | Gate | Required AC coverage | Additional oracle |
 |---|---|---|
-| F-01 | AC-63, AC-72 | Exact GitHub asset SHA-256, entitlements, Info.plist, actual Hardened Runtime/signature status, no App Sandbox, Gatekeeper/quarantine result |
-| F-02 | AC-27, AC-67 | Location granted identity proof without coordinates |
+| F-01 | AC-63, AC-72 | Exact GitHub asset SHA-256, canonical post-signing app-bundle/executable SHA-256 values when applicable, entitlements, Info.plist, actual Hardened Runtime/signature status, no App Sandbox, Gatekeeper/quarantine result |
+| F-02 | AC-27, AC-67 | Location granted coherent `IdentitySnapshotV1` proof without coordinates |
 | F-03 | AC-67 | Denied/revoked permission state transition |
-| F-04 | AC-01, AC-34, AC-68 | Exact GitHub candidate counter source and `UInt64` parser |
+| F-04 | AC-01, AC-34, AC-68 | Exact GitHub candidate counter source and bounded `NET_RT_IFLIST2` mixed-record parser, including malformed-record corpus |
 | F-05 | AC-01, AC-02, AC-34, AC-53 | Controlled traffic continuity |
 | F-06 | AC-27, AC-39 | Explicit authorization prompt and denial |
 | F-07 | AC-70, AC-74 | Lossless configuration archive and replay |
-| F-08 | AC-08, AC-54 | Target-only disconnect post-query |
+| F-08 | AC-08, AC-54 | Stable identity snapshot, target-only disconnect post-query, and valid operator-validation context for the destructive case |
 | F-09 | AC-55, AC-70, AC-74 | Restoration ownership fingerprint |
 | F-10 | AC-10, AC-40, AC-75 | Unrelated configuration preservation |
 | F-11 | AC-39 | Relaunch process-local authorization boundary |
-| F-12 | AC-09, AC-41, AC-64, AC-73 | Two-stage observation gate: preflight capability/instrumentation permits candidate integration; per-case source, awake coverage, maximum gap, and suppression/restoration classification is bound to the applicable R evidence for release |
+| F-12 | AC-09, AC-41, AC-64, AC-73 | `ObservationGateReportV1` with separate preflight and classification digests/verdicts and per-case context-validation results; preflight permits gated candidate integration, while the aggregate F-12 verdict is `PASS` only after per-case source, awake coverage, maximum gap, and suppression/restoration classification are bound to applicable R evidence for release |
 | R-01 | AC-75 | Target-present mutation |
 | R-02 | AC-75 | Target-absent verified no-op |
 | R-03 | AC-40, AC-65, AC-75 | Duplicate-security/shared-scope preservation |
@@ -194,8 +196,8 @@ Release and candidate verification must inspect these artifacts before any funct
 | Bundle identifier | `com.copylawbot.hotspotbytefence` unless changed by an explicit decision |
 | Supported architecture | `arm64` for v1 unless additional proof is added |
 | Embedded `BuildManifestV1` | Canonical manifest fields, compile-time capability constant, manifest SHA-256, bundle/architecture/mode/source agreement |
-| External `ReleaseManifestV1` | Exact schema in `HotspotByteFence_TechnicalDesign.md` Section 10: schema/version/id/status, candidate hashes, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps; its canonical digest is recorded as `releaseManifestSHA256` |
-| Local signing record | Published unsigned asset SHA-256, exact ad hoc signing procedure, post-signing app/executable SHA-256, actual signature state, and any post-signing entitlement inspection |
+| External `ReleaseManifestV1` | Exact schema in `HotspotByteFence_TechnicalDesign.md` Section 10: schema/version/id/status, unsigned-asset/app-bundle/executable candidate hashes, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps; its canonical digest is recorded as `releaseManifestSHA256` |
+| Local signing record | Published unsigned asset SHA-256, exact ad hoc signing procedure, post-signing app-bundle and executable SHA-256 values, actual signature state, and any post-signing entitlement inspection |
 | Local evidence | Full non-shared evidence with local-sensitive identifiers allowed |
 | Redacted report | Shareable derivative with hashes/redactions and no prohibited data |
 

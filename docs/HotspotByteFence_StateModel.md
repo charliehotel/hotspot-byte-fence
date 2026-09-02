@@ -1,9 +1,9 @@
 # Hotspot Byte Fence (HBF) — State Model and Command Contract
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Normative source:** [`HotspotByteFence_PRD.md`](HotspotByteFence_PRD.md)  
-**Implementation status:** Design contract only. No production Swift implementation exists in this workspace.
+**Implementation status:** Initial domain value types, profile resolution, measurement reducer, safety eligibility evaluator, and cycle calculation are implemented under `Sources/HotspotByteFenceCore`. The full runtime coordinator, command ledger, UI, and network side-effect paths remain pending.
 
 This document closes the v1 state-transition gap identified in the review evidence under `.omo/evidence`. It is a required companion to [`HotspotByteFence_TechnicalDesign.md`](HotspotByteFence_TechnicalDesign.md) and [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md). If this document and the PRD conflict, the PRD wins and this document must be corrected before implementation continues.
 
@@ -17,7 +17,7 @@ Internal enum names use stable ASCII identifiers. User-facing labels are localiz
 |---|---|---|---|---|
 | Global safety | `normal` | `state.global.normal` | Application | No global stop |
 | Global safety | `recoveryRequired` | `state.global.recoveryRequired` | Application | Stop measurement and every network action |
-| Global safety | `timeAdjustmentRequired` | `state.global.timeAdjustmentRequired` | Application | Stop measurement and every network action |
+| Global safety | `timeAdjustmentRequired` | `state.global.timeAdjustmentRequired` | Application | Stop measurement, enforcement, suppression, disconnect, and new preference writes; ownership-proven cleanup restoration may run |
 | Global safety | `multipleProfilesConnected` | `state.global.multipleProfilesConnected` | Application; effect limited to current resolution | Stop measurement and blocking for target profiles |
 | Connection | `monitoring` | `state.connection.monitoring` | Connected profile | Measurement may run |
 | Connection | `disconnected` | `state.connection.disconnected` | Selected or candidate profile | No measurement or blocking action |
@@ -48,6 +48,8 @@ Internal enum names use stable ASCII identifiers. User-facing labels are localiz
 
 Unknown persisted enum values are schema errors unless a version-specific migration names and maps them. Without a migration, HBF enters `recoveryRequired` and must not synthesize a default state.
 
+`Candidate lifecycle=OperatorValidation` is a process-local safety overlay, not a persisted enum. While it is active, a profile may show the validation result and `blockingNotGuaranteed`, but it must never project `strongBlockingReady` or expose a protected-user status. A destructive candidate case is valid only when the current process has a runner-issued `OperatorValidationContextV1` whose run id, candidate digest set, gate/case id, and fresh confirmation match the case. The context is never reconstructed from persisted state, a mutable report, or a user preference; absent, stale, or mismatched context rejects the network action.
+
 ---
 
 ## 2. Event Priority
@@ -67,7 +69,7 @@ At a single scheduling point, `RuntimeEngine` processes events in this order:
 
 A lower-priority event cannot make a successful state externally visible until all higher-priority required durable writes and reconciliation steps have succeeded. Persistence failure while committing a transition changes the outcome to `recoveryRequired` and suppresses any side effect that has not already occurred.
 
-A deterministic forward cycle transition is not a `timeAdjustmentRequired` state. If an open HBF preference transaction exists, HBF reconciles that transaction before applying the one permitted cycle reset. A backward or otherwise uncertain time adjustment stops every network action, including restoration, until the user acknowledges it. A voluntary quit remains pending when that acknowledgement or a required restoration is unresolved. Build-mode or eligibility changes use the same reconciliation-before-state-change rule.
+A deterministic forward cycle transition is not a `timeAdjustmentRequired` state. If an open HBF preference transaction exists, HBF reconciles that transaction before applying the one permitted cycle reset. A backward or otherwise uncertain time adjustment stops measurement, enforcement, suppression, disconnect, and new preference writes until the user acknowledges it. HBF may perform only an ownership-proven cleanup restoration of an already open transaction, using the normal archive, fingerprint, current-process authorization, read-back, and durable-persistence guards. A voluntary quit remains pending when acknowledgement or a required restoration is unresolved. Build-mode or eligibility changes use the same reconciliation-before-state-change rule.
 
 ---
 
@@ -82,9 +84,10 @@ The table uses these terms:
 | Event or command | Entry condition | Required durable mutation | Permitted side effect | Exit condition | Resulting state |
 |---|---|---|---|---|---|
 | First launch with no store | No canonical store, no LKG, no completed-profile marker | Create empty v1 store with `hasCompletedProfile=false` | None | Store validates | `normal`, no selected profile |
-| Launch with valid store | Canonical store decodes, integrity passes, schema supported | Mark launch event, clear process-local authorization availability | Non-interactive authorization check only if guaranteed prompt-free | Snapshot emitted | Prior profile states, authorization unavailable unless check succeeds |
+| Launch with valid store | Canonical store decodes, integrity passes, schema supported, and the journal is `complete` or validly absent because no cross-file transition is in progress | Mark launch event, clear process-local authorization availability | Non-interactive authorization check only if guaranteed prompt-free | Snapshot emitted | Prior profile states, authorization unavailable unless check succeeds |
 | Launch with missing/corrupt store after completed profile | Marker, LKG, or valid completed store proves prior completion | Preserve failed file path and recovery event | None | Recovery UI available | Global `recoveryRequired` |
 | Launch with unknown future schema | Store schema exceeds supported version | Preserve store and recovery event | None | No migration available | Global `recoveryRequired` |
+| Launch with non-complete or mismatched commit journal | `CommitJournalV1` (`commit-journal.json`) is non-complete, missing where a cross-file transition requires it, its revision/digest does not match a destination, or a cross-file cut point is unexplained | Preserve all candidate files and recovery event | None | Explicit recovery UI available | Global `recoveryRequired` |
 | Version migration | Supported older schema and valid canonical or LKG | Atomic migrated `state.json`, updated LKG, migration event | None | New schema validates | Resume with migrated states |
 | Migration failure | Migration decode/write/validation fails | Preserve source and failed migration event if possible | None | Failure recorded or write unavailable | Global `recoveryRequired` |
 | Store write/flush failure | Any required durable write fails | Preserve LKG; record failure when possible | No new network side effect | Failure detected | Global `recoveryRequired` |
@@ -93,9 +96,9 @@ The table uses these terms:
 | Wake | Previous interval closed | Wake event, baseline pending | None | Identity must be re-resolved | Resolution state based on current identity |
 | Relaunch/logout/reboot gap | New process with prior valid store | Baseline pending, downtime gap event | Non-interactive authorization check only if prompt-free | Snapshot emitted | No cross-process monotonic comparison |
 | Time zone changes forward to later cycle | Current calculation is later than trusted cycle | Apply one cycle reset, baseline pending, time event | If an open HBF transaction exists, reconcile it first; restore only when ownership and authorization guards hold | Reset and any restoration outcome are persisted | `normal` when reconciliation succeeds; otherwise `restorationPending`, `conflict`, or `unverified` |
-| Time zone or clock calculates earlier cycle | Current calculation is earlier than trusted cycle | Preserve trusted cycle/usage, baseline pending, time event | None | Acknowledgement required | Global `timeAdjustmentRequired` |
-| Wall clock moves backward | Trusted process-local monotonic comparison detects backward movement | Preserve usage/cycle, baseline pending, event | None | Acknowledgement required | Global `timeAdjustmentRequired` |
-| Wall/monotonic divergence over 60 seconds | Same awake process, no sleep boundary | Preserve usage/cycle, baseline pending, event | None | Acknowledgement required unless a single forward cycle boundary was deterministically crossed | `timeAdjustmentRequired`; a deterministic forward boundary becomes `normal` only after the one reset is durably persisted |
+| Time zone or clock calculates earlier cycle | Current calculation is earlier than trusted cycle | Preserve trusted cycle/usage, baseline pending, time event | Ownership-proven cleanup restoration of an already open transaction only; no new preference write | Acknowledgement required | Global `timeAdjustmentRequired` |
+| Wall clock moves backward | Trusted process-local monotonic comparison detects backward movement | Preserve usage/cycle, baseline pending, event | Ownership-proven cleanup restoration of an already open transaction only; no new preference write | Acknowledgement required | Global `timeAdjustmentRequired` |
+| Wall/monotonic divergence over 60 seconds | Same awake process, no sleep boundary | Preserve usage/cycle, baseline pending, event | Ownership-proven cleanup restoration of an already open transaction only; no new preference write | Acknowledgement required unless a single forward cycle boundary was deterministically crossed | `timeAdjustmentRequired`; a deterministic forward boundary becomes `normal` only after the one reset is durably persisted |
 | Acknowledge time adjustment | Global `timeAdjustmentRequired` and user confirms | Current zone/wall observation accepted, baseline pending, acknowledgement event | None | No earlier-cycle rollback; if current cycle is later, apply exactly one reset before acknowledgement succeeds | `normal` after persistence, or a new-cycle normal state |
 | Identity permission granted | Location permission becomes usable | Permission event, baseline pending for affected target | None | Identity can be read | Current resolution applies |
 | Identity permission denied/revoked/restricted | SSID/BSSID needed and unavailable | Permission event, baseline pending | None | State emitted | `locationPermissionRequired`, no measurement/blocking |
@@ -115,7 +118,7 @@ The table uses these terms:
 | Sample crosses reset boundary | Two trusted samples span effective reset boundary | Apply new cycle, zero usage, clear cycle-bound states, baseline pending | Restore open transaction if enforcement ends | Reset flushed | `normal`, no interval delta |
 | Limit reached by sample or lower limit | Usage >= configured limit | Persist `limitReached`, retry state initialized when eligible | Blocking action only after durable limit transition | Limit transition flushed | `limitReached`; then enforcement event may run |
 | Profile ineligible at limit | Shared interface/SSID, measurement-only build, pending gates, auth unavailable, or global stop | Persist protection reason | None | Snapshot emitted | `blockingNotGuaranteed`; use `blockingPaused` only when the profile's pause flag is true |
-| Explicit authorization request | User invokes authorization action for eligible profile | Authorization attempt event | `SFAuthorization` prompt with required right/flags only | Authorization object usable in this process | `strongBlockingReady` if other guards hold |
+| Explicit authorization request | User invokes authorization action for eligible profile | Authorization attempt event | `SFAuthorization` prompt with required right/flags only | Authorization object usable in this process | `strongBlockingReady` if `Candidate lifecycle=Production` and all other guards hold; otherwise `blockingNotGuaranteed` with validation result |
 | Authorization denied/unavailable | Prompt denied, cancelled, or non-interactive check unavailable | Authorization failure event | No automatic reprompt | Failure recorded | `blockingNotGuaranteed` |
 | Authorization invalidated | Quit, relaunch, timeout, explicit invalidation, or provider failure | Audit event, process-local capability cleared | None | Snapshot emitted | `blockingNotGuaranteed` until explicit retry |
 | Prepare preference suppression | Limit reached, eligible, authorized, unique interface/SSID, target identity exact | Persist `prepared` with original/intended archives and fingerprints | None | Flush succeeds | `prepared` |
@@ -175,6 +178,16 @@ revision returns `staleSnapshot` after a fresh snapshot is emitted; it never
 implicitly retries the command with new state. A command result is persisted
 before it is reported as successful.
 
+The persisted command result is a durable historical command result, not a
+restoration of a process-local effect. For `requestBlockingAuthorization`, a replay after a
+process restart returns the historical result without prompting again and
+reports the current effect as `authorizationRequired` when no usable
+authorization exists. For `recordManualReconnectIntent`, a replay after a
+restart or token expiry returns the historical result without recreating a
+token and reports the current effect as `intentExpired` or
+`intentUnavailable`. These current-effect values are runtime response state
+and are never persisted as usable capabilities.
+
 | Command | Payload | Confirmation | Success contract | Failure contract |
 |---|---|---|---|---|
 | `createProfileFromCurrentNetwork` | alias, limit, reset day | Required only for shared interface/SSID warning | Saves complete profile only when identity, limit, and alias validate | Saves no partial identity; shows permission/identity error |
@@ -198,11 +211,15 @@ before it is reported as successful.
 
 `CWInterface.disassociate()` operates on the interface's current association. HBF cannot make that call atomically conditional on SSID/BSSID through the public API. Therefore v1 uses a conservative fail-closed contract rather than claiming a stronger guarantee than the API provides.
 
+### 5.1 Stable identity snapshot
+
+Every identity-dependent transition uses one `IdentitySnapshotV1` with the fields `interfaceName`, `interfaceIndex`, `linkState`, raw `ssidBytes`, and `bssid`. CoreWLAN exposes these values through separate getters, so the adapter must enumerate the interfaces once and serialize two consecutive reads of all required fields from that same pass. It accepts the snapshot only when every required field is byte-for-byte equal across both reads and no interface-change observation occurs between them. A missing value, getter failure, enumeration change, callback/getter race, or mismatch rejects the snapshot. The rejected snapshot cannot produce a measurement delta, preference write, disconnect, or suppression observation. The same procedure is required immediately before a preference write and immediately before `disassociate()`.
+
 The algorithm is:
 
-1. Resolve the target immediately before any preference write. If interface name, SSID bytes, or BSSID is unavailable or not equal to the target tuple, stop.
-2. Commit a suppression preference only after a flushed `prepared` transaction and a second exact identity read.
-3. Read the identity again immediately before `disassociate()`.
+1. Obtain a stable `IdentitySnapshotV1` immediately before any preference write. If interface name, interface index, SSID bytes, or BSSID is unavailable or not equal to the target tuple, stop.
+2. Commit a suppression preference only after a flushed `prepared` transaction and a fresh stable identity snapshot.
+3. Obtain another stable `IdentitySnapshotV1` immediately before `disassociate()`.
 4. Call `disassociate()` only when that final read still matches the exact target tuple.
 5. Immediately query the interface at most five times over a two-second monotonic deadline. Success requires the target tuple to be absent. A returned API call without post-query absence is not success.
 6. If the interface changes to an unrelated network between the final read and the call, public CoreWLAN does not expose an atomic guard that can prove the call did not affect that unrelated network. This residual TOCTOU window is classified as an unproven safety boundary in the release gate. Until R-05 and R-04 prove no unrelated disconnect on every supported macOS build, the artifact cannot make a strong-blocking distribution claim.
@@ -211,7 +228,7 @@ This contract satisfies the product's safety rule by failing closed before the c
 
 ---
 
-## 5.1 Network Observation Contract
+### 5.2 Network Observation Contract
 
 The runtime represents every suppression and restoration sample as a `WiFiObservationV1` value containing the canonical interface name, link state, optional raw SSID bytes, optional BSSID, observation source, process lifecycle identifier, and monotonic timestamp. A display name, wall-clock duration, or absence of an HBF association call is not sufficient evidence.
 

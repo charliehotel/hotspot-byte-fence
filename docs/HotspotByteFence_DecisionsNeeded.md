@@ -1,6 +1,6 @@
 # Hotspot Byte Fence (HBF) — Decisions Needed
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Scope:** Binding implementation and release decisions. The remaining external facts are candidate-gate inputs, not unresolved product design questions.
 
@@ -21,20 +21,21 @@ Destructive candidate execution and evidence redaction follow [`HotspotByteFence
 
 **Resolved value:** Keep `com.copylawbot.hotspotbytefence`.
 
-**Resolved distribution policy:** Distribute the v1 artifact directly through a GitHub Release as a Copy App. The published package is an unsigned ZIP containing the `.app` and a `SHA-256SUMS` manifest. Before supported use, the user must ad hoc-sign the extracted `.app` locally. This is an installation prerequisite for the supported path and is not Developer ID signing or notarization. Developer ID signing, notarization, and Hardened Runtime are not release prerequisites. Every release must include the exact unsigned asset SHA-256, the canonical local signing procedure, and first-launch/Gatekeeper instructions. The unsigned asset digest must be verified before signing. A locally signed app is a derived artifact; its signature and digest are recorded separately and it does not inherit exact-candidate gate evidence unless that exact signed artifact is tested. A release versioning convention remains a packaging input, but it does not block domain, measurement, or candidate-gate implementation.
+**Resolved distribution policy:** Distribute the v1 artifact directly through a GitHub Release as a Copy App. The published package is an unsigned ZIP containing the `.app` and a `SHA-256SUMS` manifest. Before supported use, the user must ad hoc-sign the extracted `.app` locally. This is an installation prerequisite for the supported path and is not Developer ID signing or notarization. Developer ID signing, notarization, and Hardened Runtime are not release prerequisites. Every release must include the exact unsigned asset SHA-256, the canonical local signing procedure, and first-launch/Gatekeeper instructions. The unsigned asset digest must be verified before signing. A locally signed app is a derived artifact; its app-bundle digest, executable digest, signature, and actual entitlements are recorded separately and it does not inherit exact-candidate gate evidence unless that exact signed artifact is tested. A release versioning convention remains a packaging input, but it does not block domain, measurement, or candidate-gate implementation.
 
 ---
 
-## 2. Initial Support Matrix
+## 2. Compatibility Target and Exact Support Matrix
 
-**Decision:** Limit the initial support claim to macOS 26.6.2 build 25G83 on `arm64` until additional exact rows pass.
+**Decision:** Set the v1 compatibility validation target to macOS 13.0 or later on `arm64`, while granting a support claim only to exact macOS build rows that pass the applicable gates.
 
 | Option | Effect |
 |---|---|
-| Keep only macOS 26.6.2/25G83/arm64 initially | Smallest proof burden; no broader support claim |
-| Add macOS 13+ rows | Requires identity, counter, blocking, restoration, UI, and release proof on every added build/architecture |
+| Keep only the current 26.6.2/25G83/arm64 row | Smallest immediate proof burden; older OS families remain unclaimed |
+| Validate macOS 13+ on arm64 | Extends the target to Ventura, Sonoma, Sequoia, and Tahoe; every exact added build requires applicable identity, counter, blocking, restoration, UI, and release proof |
+| Add Intel `x86_64` | Separate architecture target requiring repeated counter, CoreWLAN, blocking, restoration, and release proof; outside v1 |
 
-**Resolved value:** Keep only macOS 26.6.2 build 25G83 on `arm64` as a pending validation row. The macOS 13.0 deployment target remains a compilation floor only.
+**Resolved value:** The v1 compatibility validation target is macOS 13.0 or later on `arm64`, covering Ventura 13, Sonoma 14, Sequoia 15, and Tahoe 26. The exact support matrix remains the authority: an OS/build is unsupported until its exact row and applicable gates are recorded. The current macOS 26.6.2 build 25G83 row remains pending. Intel `x86_64` remains outside v1.
 
 ---
 
@@ -107,12 +108,40 @@ Deletion is a full profile-scoped purge. A tombstone remains only to prevent res
 
 ### 7.4 State and time precedence
 
-`MultipleProfilesConnected` is application-global as a safety flag, but it stops measurement and blocking only for the current resolved target set. A deterministic forward cycle transition is not a time-adjustment error and reconciles an open preference transaction before resetting. Backward or uncertain time adjustment stops all network actions until acknowledgement.
+`MultipleProfilesConnected` is application-global as a safety flag, but it stops measurement and blocking only for the current resolved target set. A deterministic forward cycle transition is not a time-adjustment error and reconciles an open preference transaction before resetting. Backward or uncertain time adjustment stops measurement, suppression, disconnect, and new preference writes until acknowledgement. An ownership-proven restoration of an already open HBF transaction is allowed as cleanup under the restoration guards; it never resumes enforcement or measurement.
 
 ### 7.5 Artifact and release authority
 
-The executable's compile-time capability constant and embedded `BuildManifestV1` must agree. The external `ReleaseManifestV1` binds the exact candidate, source, asset, executable, build manifest, support row, and gate reports. Mutable local state cannot promote capability, and an external report cannot change the bytes that were tested.
+The executable's compile-time capability constant and embedded `BuildManifestV1` must agree. The external `ReleaseManifestV1` binds the exact candidate, source, unsigned asset, tested app bundle and executable, build manifest, support row, and gate reports; the app-bundle and executable values are post-signing values when the tested path includes local signing. The app-bundle digest uses `hbf-app-bundle-v1-sha256` and is distinct from the executable digest. Mutable local state cannot promote capability, and an external report cannot change the bytes that were tested.
 
 ### 7.6 Observation gate phases
 
 F-12 has a preflight phase and a classification phase. `F-12-preflight` proves that the candidate can expose and record event-backed observations and the bounded polling fallback; it is the observation prerequisite for gated candidate integration. `F-12-classification` is derived from the applicable suppression and restoration R cases and is required before a strong-blocking release verdict. Polling-only evidence may support measurement or restoration observation, but it never proves automatic-reconnection suppression.
+
+### 7.7 Measurement persistence cadence
+
+The five-second rule is the awake sampling and durable snapshot cadence. The 10 MB condition is evaluated only for bytes newly observed by a valid counter sample since the previous durable snapshot; it is not a bound on physical bytes transferred between samples. The UI and recovery contract must disclose that unobserved traffic can exceed 10 MB and the displayed limit before the next sample.
+
+### 7.8 Volatile command effects
+
+The command ledger preserves the durable historical command result and prevents a duplicate mutation. It never recreates process-local authorization or a one-shot manual-reconnection token after relaunch, logout, or reboot. A replay response must expose the historical result separately from the current effect state: the current state is `authorizationRequired` when usable authorization is absent and `intentExpired` or `intentUnavailable` when a manual intent token is not active.
+
+### 7.9 Time adjustment and owned restoration
+
+`Time Adjustment Required` pauses measurement, enforcement, suppression, disconnect, and new preference writes. HBF may perform only an ownership-proven restoration of an already open transaction when the current configuration still matches HBF's last-written fingerprint, the archive is valid, and the required authorization is available from the current process. If authorization or ownership cannot be proven, HBF performs no write and persists `RestorationPending`, `Conflict`, or `Unverified` as applicable.
+
+### 7.10 Operator-validation lifecycle
+
+`OperatorValidation` is a process-local candidate lifecycle, never a user or persisted configuration. The runner must issue an `OperatorValidationContextV1` for each destructive case with the run id, exact candidate digest set, gate/case id, and fresh confirmation. The candidate rejects destructive actions without a matching current context, presents `Validation Candidate`, and never projects or persists `StrongBlockingReady`. This context is a workflow binding rather than administrator authorization; the normal `SFAuthorization` and transaction guards still apply.
+
+### 7.11 Counter parser contract
+
+The `NET_RT_IFLIST2` adapter treats the byte buffer as untrusted. It validates a common prefix sufficient for `ifm_msglen` and `ifm_type`, checks minimum/maximum length and offset progress, and skips shorter non-target records only after those checks. A target `RTM_IFINFO2` record must additionally contain the full SDK-derived `if_msghdr2` header and `if_data64` region. Fields are read with bounds-checked byte copies, and exactly one matching record must agree with the interface index and name. Truncated, zero-length, unknown-layout, duplicate, unaligned, or mismatched input rejects the sample. The complete negative corpus is part of `FX-Counter-001`.
+
+### 7.12 Stable identity snapshot
+
+`IdentitySnapshotV1` is the only identity tuple accepted by measurement, preference, disconnect, or suppression logic. It contains interface name/index, link state, raw SSID bytes, and BSSID, and is accepted only when two consecutive reads from one enumeration pass are byte-for-byte equal. A getter race, event/interface change, unavailable value, or mismatch rejects the snapshot and causes no side effect.
+
+### 7.13 Cross-file commit recovery
+
+Any transition that replaces more than one persistence file uses `CommitJournalV1`: write and flush `prepared` before the first replacement, record and flush each validated destination digest and phase, and mark `complete` only after all cross-file invariants pass. Launch recovery enters `RecoveryRequired` for a non-complete, required-but-missing, digest-mismatched, or unexplained journal and preserves candidate files. The only automatic continuation is an incomplete profile-deletion purge from its durable tombstone, while the deleted profile remains hidden.

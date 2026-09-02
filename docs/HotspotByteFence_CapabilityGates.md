@@ -1,11 +1,11 @@
 # Hotspot Byte Fence (HBF) — Capability Gate Record
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Current verdict:** `PENDING`  
-**Scope:** Initial `arm64` validation target only
+**Scope:** macOS 13.0 or later compatibility validation target on `arm64`; exact build rows remain the support authority
 
-This record distinguishes API discovery from exact GitHub-candidate proof. A compiler check, Swift interpreter run, mock adapter, or helper artifact that is different from the exact GitHub release path is not a capability-gate pass. The published GitHub asset is an unsigned ZIP, and supported user setup signs the extracted app locally with the canonical procedure in `README.md`. A gate run must identify whether it exercised the published unsigned asset or the post-signing app, bind their digests separately, and record the actual signature state. Developer ID signing, notarization, and Hardened Runtime are not prerequisites.
+This record distinguishes API discovery from exact GitHub-candidate proof. A compiler check, Swift interpreter run, mock adapter, or helper artifact that is different from the exact GitHub release path is not a capability-gate pass. The published GitHub asset is an unsigned ZIP, and supported user setup signs the extracted app locally with the canonical procedure in `README.md`. A gate run must identify whether it exercised the published unsigned asset or the post-signing app, bind the app-bundle and executable digests separately, and record the actual signature state. Developer ID signing, notarization, and Hardened Runtime are not prerequisites.
 
 Required design and evidence companions:
 
@@ -29,7 +29,7 @@ Required design and evidence companions:
 | Distribution posture | GitHub direct Copy App, non-sandboxed; unsigned package; local user-side ad hoc signing required before supported use; Developer ID/notarization/Hardened Runtime recorded if present but not required |
 | App Sandbox | Disabled by approved v1 design |
 
-This environment is the only initial validation entry. macOS 13.0 remains a deployment floor and has no support claim.
+This environment is the current initial validation entry. The compatibility validation target is macOS 13.0 or later on `arm64`, covering Ventura 13, Sonoma 14, Sequoia 15, and Tahoe 26. This target range is not a support claim; each exact build requires its own pending row and applicable candidate evidence. Intel `x86_64` remains outside v1.
 
 ---
 
@@ -52,10 +52,10 @@ Strong-blocking candidate integration may proceed only when F-01 through F-11 an
 
 | ID | Scenario | Required evidence | Status |
 |---|---|---|---|
-| F-01 | Distribution posture | Exact published unsigned asset SHA-256, canonical local ad hoc-signing procedure, post-signing app/executable digest and actual signature status when applicable, App Sandbox absence, actual Hardened Runtime status, quarantine state, and Gatekeeper launch outcome are recorded; Developer ID is not required | `PENDING` |
-| F-02 | Location granted | Exact interface name, nonempty SSID bytes, and canonical BSSID are returned without storing coordinates | `PENDING` |
+| F-01 | Distribution posture | Exact published unsigned asset SHA-256, canonical local ad hoc-signing procedure, post-signing app-bundle and executable digests and actual signature status when applicable, App Sandbox absence, actual Hardened Runtime status, quarantine state, and Gatekeeper launch outcome are recorded; Developer ID is not required | `PENDING` |
+| F-02 | Location granted | Exact interface name, interface index, nonempty SSID bytes, and canonical BSSID are returned as a coherent `IdentitySnapshotV1` double-read without storing coordinates | `PENDING` |
 | F-03 | Location denied/revoked | Identity-dependent measurement and blocking stop with the required state | `PENDING` |
-| F-04 | Candidate counter read | `NET_RT_IFLIST2` returns checked 64-bit RX/TX for the selected interface in the exact GitHub candidate | `PENDING` |
+| F-04 | Candidate counter read | The exact GitHub candidate parses `NET_RT_IFLIST2` with checked mixed-record bounds, `ifm_msglen` validation, aligned-safe field reads, exact interface index/name matching, and checked 64-bit RX/TX extraction | `PENDING` |
 | F-05 | Counter continuity | Controlled traffic increases the selected interface counters without adding another interface | `PENDING` |
 | F-06 | Administrator authorization | Explicit `SFAuthorization` succeeds and denial is handled without automatic reprompt | `PENDING` |
 | F-07 | Configuration round-trip | Complete public `CWConfiguration` archives, decodes, compares, and replays losslessly | `PENDING` |
@@ -63,15 +63,15 @@ Strong-blocking candidate integration may proceed only when F-01 through F-11 an
 | F-09 | Restoration ownership | Original configuration is restored only when the current fingerprint matches HBF's last write | `PENDING` |
 | F-10 | Unrelated preservation | Non-target preferred networks and public configuration values remain byte/semantic equivalent | `PENDING` |
 | F-11 | Process-local authorization | Relaunch does not treat persisted success as usable authorization; a non-interactive check never prompts, and unavailable authorization requires explicit user action | `PENDING` |
-| F-12 | Observation source and coverage | The exact candidate first proves the observation capability and instrumentation, then records event-backed callback delivery, one-second polling fallback, awake duration, maximum observation gap, and suppression/restoration result classification from the applicable R cases | `PENDING` |
+| F-12 | Observation source and coverage | The exact candidate first proves the observation capability and instrumentation, then records event-backed callback delivery, one-second polling fallback, awake duration, maximum observation gap, and suppression/restoration result classification from the applicable R cases; each destructive case is bound to a valid `OperatorValidationContextV1` | `PENDING` |
 
 F-06 through F-10 and F-12 can disrupt the current Wi-Fi connection, modify system preferences, or require a live observation window. They require a separately confirmed operator session and must not be run as an incidental automated test. F-12 is a two-stage gate: `F-12-preflight` runs before destructive cases and proves callback/entitlement visibility, polling cadence, and evidence instrumentation; `F-12-classification` is finalized from the applicable suppression/restoration cases after the R run. The preflight result is a prerequisite for strong R-06/R-07, while the complete F-12 verdict is not credited until its per-case classification evidence exists.
 
-F-06 must record the exact `SFAuthorization` right string and flags used for `commitConfiguration(_:authorization:)`. F-07 must record the `CWConfigurationArchiveV1` schema version, canonical bytes, replay result, read-back result, and equality comparator result. F-08 must include the conservative pre-call revalidation and bounded post-query algorithm from `HotspotByteFence_StateModel.md`; it must not claim atomic target-only disconnect unless the tested public API behavior proves it on the exact macOS build. F-12 is a prerequisite for strong blocking: polling-only or lifecycle-only evidence may be retained, but it cannot produce a verified suppression result. A poll-backed restoration observation may credit restoration evidence only when its timing coverage is complete; it never upgrades suppression to verified.
+F-06 must record the exact `SFAuthorization` right string and flags used for `commitConfiguration(_:authorization:)`. F-07 must record the `CWConfigurationArchiveV1` schema version, canonical bytes, replay result, read-back result, and equality comparator result. F-08 must include the stable identity snapshot, conservative pre-call revalidation, and bounded post-query algorithm from `HotspotByteFence_StateModel.md`; it must not claim atomic target-only disconnect unless the tested public API behavior proves it on the exact macOS build. The candidate runner must reject a destructive case when its `OperatorValidationContextV1` is absent, stale, or mismatched, and the candidate must never present `StrongBlockingReady` in that lifecycle. F-12 is a prerequisite for strong blocking: polling-only or lifecycle-only evidence may be retained, but it cannot produce a verified suppression result. A poll-backed restoration observation may credit restoration evidence only when its timing coverage is complete; it never upgrades suppression to verified.
 
 ### 3.1 Gate verdict rule
 
-- `PASS`: F-01 through F-11 pass and the `F-12-preflight` phase passes for the exact candidate. The F-12 record must identify whether its per-case classification is pending or bound to R-case evidence.
+- `PASS` for candidate-feasibility readiness: F-01 through F-11 pass and the `F-12-preflight` phase passes for the exact candidate. The aggregate `gateVerdicts[F-12]` may remain `PENDING` until classification is bound to the applicable R-case evidence.
 - `FAIL`: A required public API or approved distribution boundary cannot satisfy the scenario reproducibly.
 - `PENDING`: Evidence is incomplete or not bound to the exact candidate.
 - `BLOCKED`: A named external prerequisite, such as the exact GitHub artifact, required macOS permission, or operator-approved network setup, is unavailable. Developer ID signing identity is not an external prerequisite for v1.
@@ -120,7 +120,7 @@ Requires all feasibility cases plus the following real-Mac scenarios:
 
 Current verdict: `PENDING`
 
-R-13 and R-14 must prove relaunch reconciliation for `Prepared` and `Applied` transactions, including the no-automatic-prompt restoration path when no process-local authorization is available. R-05 must explicitly report whether any residual target-switch/TOCTOU risk remains for `CWInterface.disassociate()` on the tested macOS build. R-01 through R-04 and R-09 through R-12 must include the persistence schema's archive/fingerprint algorithm id and redacted-report separation. R-06 and R-07 must include the observation source and maximum-gap result; a polling-only result cannot be reported as a strong-blocking suppression pass.
+R-13 and R-14 must prove relaunch reconciliation for `Prepared` and `Applied` transactions, including the no-automatic-prompt restoration path when no process-local authorization is available. They must also exercise the applicable `CommitJournalV1` phase and every relevant crash cut point. R-05 must explicitly report whether any residual target-switch/TOCTOU risk remains for `CWInterface.disassociate()` on the tested macOS build. R-01 through R-04 and R-09 through R-12 must include the persistence schema's archive/fingerprint algorithm id and redacted-report separation. R-06 and R-07 must include the observation source and maximum-gap result; a polling-only result cannot be reported as a strong-blocking suppression pass.
 
 ---
 
@@ -130,7 +130,16 @@ R-13 and R-14 must prove relaunch reconciliation for `Prepared` and `Applied` tr
 |---|---|---|---|---|---|---|
 | 26.6.2 | 25G83 | `arm64` | `PENDING` | `PENDING` | `PENDING` | Unsupported until applicable gates pass |
 
-Adding a row requires a new exact candidate report. A deployment target or API availability check does not add support.
+Compatibility target families awaiting exact build rows:
+
+| macOS family | Architecture | Target status |
+|---|---|---|
+| Ventura 13 | `arm64` | Exact build row and applicable gates pending |
+| Sonoma 14 | `arm64` | Exact build row and applicable gates pending |
+| Sequoia 15 | `arm64` | Exact build row and applicable gates pending |
+| Tahoe 26 | `arm64` | Exact build row and applicable gates pending |
+
+Adding an exact support row requires a new candidate report. A deployment target or API availability check does not add support. A row may receive `measurementOnly` status when identity and counter capability pass but strong-blocking fails; strong-blocking remains unavailable for that row. A build absent from the exact matrix receives no measurement or strong-blocking claim.
 
 ---
 
@@ -156,9 +165,9 @@ The canonical manifest is UTF-8 JSON with sorted keys and no insignificant white
 
 ### 6.2 External `ReleaseManifestV1`
 
-The external `ReleaseManifestV1` uses the exact schema in Section 10 of `HotspotByteFence_TechnicalDesign.md`: schema/version/id/status, published unsigned asset and tested post-signing candidate hashes, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps. Its canonical JSON digest is recorded as `releaseManifestSHA256` in candidate evidence. The release process compares every value with the local candidate evidence before approval. A user-resigned app without a matching post-signing digest is a derived artifact and cannot inherit the candidate verdict.
+The external `ReleaseManifestV1` uses the exact schema in Section 10 of `HotspotByteFence_TechnicalDesign.md`: schema/version/id/status, published unsigned-asset plus tested app-bundle and executable hashes, measured after signing when the tested path includes signing, fixed support-row shape, signature/runtime/quarantine/Gatekeeper fields, and complete F/R digest and verdict maps. Its canonical JSON digest is recorded as `releaseManifestSHA256` in candidate evidence. The release process compares every value with the local candidate evidence before approval. A user-resigned app without matching post-signing app-bundle and executable digests is a derived artifact and cannot inherit the candidate verdict.
 
-`strongBlockingCapable` is distributable only when F-01 through F-12, the identity and counter capability gates, and R-01 through R-15 pass for the exact unchanged artifact. `measurementOnly` is distributable only when identity and counter capability gates pass and the strong-blocking gate fails. An external report, a mutable store, a user preference, or a signature status cannot promote `measurementOnly` to strong blocking. A candidate that is not yet approved is not a protected user release and must be exercised only through the operator-validation workflow.
+`strongBlockingCapable` is distributable only when F-01 through F-12, the identity and counter capability gates, and R-01 through R-15 pass for the exact unchanged artifact. For F-12, the aggregate verdict is derived from the canonical `ObservationGateReportV1` containing both preflight and classification phase records. `measurementOnly` is distributable only when identity and counter capability gates pass, the strong-blocking gate fails, and the embedded `BuildManifestV1.compiledMode` is `measurementOnly` in a separately built unchanged artifact. An external report, a mutable store, a user preference, or a signature status cannot promote `measurementOnly` to strong blocking. A candidate that is not yet approved is not a protected user release and must be exercised only through the operator-validation workflow.
 
 ### 6.3 Operator preconditions
 
@@ -181,6 +190,7 @@ Before each run, the operator records the role availability, current network ide
 - Full source revision
 - Embedded `BuildManifestV1` SHA-256 and compiled capability mode
 - External `ReleaseManifestV1` identifier and SHA-256, when present
+- Tested post-signing app-bundle SHA-256 using `hbf-app-bundle-v1-sha256`, when the tested path includes signing
 - Executable SHA-256
 - GitHub release tag and exact asset SHA-256
 - Actual code signature status and designated requirement, if a signature exists
@@ -197,7 +207,7 @@ Before each run, the operator records the role availability, current network ide
 - Disconnect and post-disconnect observations
 - Suppression and restoration observation results
 - Observation source (`eventBacked`, `pollBacked`, or `lifecycleOnly`), awake duration, and maximum gap
-- Operator topology role availability and run identifier
+- Operator topology role availability, run identifier, gate/case identifier, and the `OperatorValidationContextV1` validation result
 - Unrelated-network preservation result
 - Final verdict and unresolved risks
 

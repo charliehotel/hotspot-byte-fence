@@ -1,9 +1,9 @@
 # Hotspot Byte Fence (HBF) — Persistence Schema and Recovery Contract
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Normative source:** [`HotspotByteFence_PRD.md`](HotspotByteFence_PRD.md)  
-**Implementation status:** Design contract only. No production Swift implementation exists in this workspace.
+**Implementation status:** Initial typed persistence foundation is implemented under `Sources/HotspotByteFenceCore` with canonical JSON, owner-only permissions, LKG validation, journal phases, digest checks, and explicit recovery results. The complete `StoreEnvelopeV1`, installation marker, tombstone purge, command ledger, and preference archive remain pending.
 
 This document defines the concrete v1 logical store. It must be implemented with typed Swift `Codable` records or stricter equivalent parsers. Ad hoc string manipulation is not acceptable at the persistence boundary. Real-Mac candidate execution and evidence handling follow [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md).
 
@@ -19,6 +19,7 @@ All files live under the application support directory for `com.copylawbot.hotsp
 | `state.lkg.json` | `0600` | Last-known-good validated store | Updated only after canonical validation succeeds |
 | `installation.json` | `0600` | Completed-profile marker and installation id | Written after first completed profile store validates |
 | `tombstones.json` | `0600` | Deleted profile ids and deletion revisions | Written before profile purge is reported |
+| `commit-journal.json` | `0600` | Cross-file transition phase and validated digests | Written and flushed before any multi-file transition |
 | `failed-state/<timestamp>-state.json` | `0600` | Preserved unreadable/corrupt canonical files | Best-effort diagnostic preservation |
 | `evidence-local/*.json` | `0600` | Full local GitHub-candidate evidence | Local only; may contain redacted identifiers but no secrets |
 | `reports-redacted/*.json` | `0644` or stricter | Shareable report with hashed/redacted identity | Generated from local evidence, never the canonical source |
@@ -97,6 +98,60 @@ validate. A marker with `hasCompletedProfile=true` is never replaced by a
 fresh-install marker. A marker with an unknown schema or inconsistent
 installation id enters `recoveryRequired`.
 
+#### CommitJournalV1 (`commit-journal.json`)
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `schemaVersion` | UInt | Yes | `1` |
+| `installationID` | UUIDString | Yes | Must equal the canonical store, LKG, marker, and tombstones |
+| `operation` | Closed transition enum | Yes | `firstCompletedProfile`, `measurementSample`, `limitReached`, `preferencePrepare`, `preferenceApplied`, `restoration`, `profileDeletion`, or `recoveryFromLKG` |
+| `targetStoreRevision` | UInt64String | Yes | Revision intended by the transition |
+| `phase` | Closed phase enum | Yes | `prepared`, `canonicalCommitted`, `lkgCommitted`, `markerCommitted`, `purgeInProgress`, or `complete` |
+| `canonicalDigest` | SHA256Hex or null | Yes | Last validated `state.json` digest for this transition |
+| `lkgDigest` | SHA256Hex or null | Yes | Last validated `state.lkg.json` digest for this transition |
+| `installationDigest` | SHA256Hex or null | Yes | Last validated `installation.json` digest for this transition |
+| `tombstoneDigest` | SHA256Hex or null | Yes | Last validated `tombstones.json` digest for this transition |
+| `updatedAt` | Instant | Yes | Journal phase update time |
+
+The operation fixes the affected replacement set and the only legal phase
+sequence:
+
+| Operation | Affected replacement files | Legal phase sequence |
+|---|---|---|
+| `firstCompletedProfile` | `state.json`, `state.lkg.json`, `installation.json` | `prepared` → `canonicalCommitted` → `lkgCommitted` → `markerCommitted` → `complete` |
+| `measurementSample`, `limitReached`, `preferencePrepare`, `preferenceApplied`, `restoration` | `state.json`, `state.lkg.json` | `prepared` → `canonicalCommitted` → `lkgCommitted` → `complete` |
+| `profileDeletion` | `state.json`, `state.lkg.json`, `tombstones.json` | `prepared` → `purgeInProgress` → `complete` |
+| `recoveryFromLKG` | `state.json`, `state.lkg.json`; current tombstone digest is a read-only guard | `prepared` → `canonicalCommitted` → `lkgCommitted` → `complete` |
+
+In `prepared`, each affected file's digest records the last fully validated
+pre-transition bytes. `canonicalCommitted` requires the target `state.json`
+revision and digest; `lkgCommitted` additionally requires the target LKG
+revision and digest; `markerCommitted` additionally requires the target
+installation-marker digest. `purgeInProgress` requires a durable tombstone
+with `purgeCompleted=false` and records the latest validated digest for every
+file reached so far. `complete` requires every affected destination and all
+cross-file invariants to validate at the target revision. A digest for a
+non-affected file is null unless it is included as a read-only cross-file
+guard. A phase transition that does not satisfy these requirements is itself
+invalid and enters `recoveryRequired`.
+
+The journal is written and flushed in `prepared` phase before the first file
+replacement. After each required replacement, the destination is decoded and
+validated, its digest is recorded, and the journal is flushed again. A
+transition becomes `complete` only after every required file and cross-file
+invariant validates. The journal is retained as the latest completed record;
+it must not be deleted as a substitute for recovery evidence.
+
+At launch, a non-complete journal, a journal digest or revision mismatch, or a
+cross-file relation that cannot be explained by the journal enters
+`recoveryRequired`. HBF preserves all candidate files and never chooses a
+lower or merely newer copy automatically. The only automatic continuation is
+resuming a `profileDeletion` whose durable tombstone has `purgeCompleted=false`;
+the deleted profile remains hidden until the purge validates. A missing journal
+is valid only for a first-run store or a fully validated state with no
+cross-file transition in progress; if cross-file relations show that a transition
+required a journal, the missing file enters `recoveryRequired`.
+
 #### IntegrityRecord
 
 | Field | Type | Required | Notes |
@@ -148,6 +203,7 @@ identity snapshot used for exact current-network revalidation.
 | `releaseManifestID` | String or null | Yes | Immutable release input when available |
 | `releaseManifestSHA256` | SHA256Hex or null | Yes | SHA-256 of the canonical external `ReleaseManifestV1`; required with `releaseManifestID` for candidate/release evidence |
 | `releaseAssetSHA256` | SHA256Hex or null | Yes | Digest of the published unsigned GitHub ZIP asset; required before release evidence is accepted |
+| `appBundleSHA256` | SHA256Hex or null | Yes | Digest of the exact tested `.app`; when signed, measured after signing with `hbf-app-bundle-v1-sha256` |
 | `executableSHA256` | SHA256Hex or null | Yes | Digest of the exact tested app executable, including its post-signing state when the tested path uses local ad hoc signing |
 | `codeSignatureStatus` | `unsigned`, `adhoc`, or `developerID` | Yes | Actual status; Developer ID is not required |
 | `codeSignatureTeamID` | String or null | Yes | No secret material; normally null for unsigned/ad hoc artifacts |
@@ -209,9 +265,17 @@ identity snapshot used for exact current-network revalidation.
 | `lastTXBytes` | UInt64String or null | Yes | Target interface counter |
 | `lastSampleWallClock` | Instant or null | Yes | Actual sample time |
 | `lastPersistedUsageAt` | Instant | Yes | Cadence evidence |
-| `bytesSinceLastFlush` | UInt64String | Yes | 10 MB cadence trigger |
+| `bytesSinceLastFlush` | UInt64String | Yes | Newly measured bytes since the previous durable snapshot; 10 MB trigger is evaluated only after a valid counter sample |
 
 No monotonic timestamp is persisted. The process may hold monotonic observations in memory only.
+
+While the store is healthy, every successful awake measurement transition is
+durably flushed on the nominal five-second sampling cadence. If a valid sample
+observes at least 10 MB in `bytesSinceLastFlush`, that transition is flushed
+immediately. This byte count covers measured deltas only; it is not a bound on
+physical traffic transferred between counter samples. A missed sample or a
+failed flush is recorded as a measurement gap or storage failure and must not
+be represented as recovered exact usage after relaunch.
 
 ### 4.6 IdentitySnapshotRecord
 
@@ -220,6 +284,7 @@ No monotonic timestamp is persisted. The process may hold monotonic observations
 | `profileID` | UUIDString | Yes | Exact resolved profile |
 | `interfaceName` | String | Yes | Canonical BSD name |
 | `interfaceIndex` | UInt32 | Yes | Counter matching guard |
+| `linkState` | `associated` | Yes | A trusted measurement identity is persisted only while associated |
 | `ssidHex` | Hex string | Yes | Raw bytes |
 | `bssid` | BSSID string | Yes | Confirmed canonical BSSID |
 
@@ -313,9 +378,11 @@ Cross-field transaction invariants are mandatory:
 - `phase=applied` or `phase=restorationPending` requires a non-null
   `lastWrittenArchive`, `lastWrittenFingerprint`, and `appliedAt`.
 - `phase=restored` requires `restoredAt`, a successful original read-back, and
-  `observation` equal to `none`, `pending`, or `verified`; `observationSource`
-  must be `none` when the observation is `none`, and must not be
-  `lifecycleOnly` when the observation is `verified`.
+  `observation` equal to `none`, `pending`, `verified`, or `unverified`;
+  `observationSource` must be `none` when the observation is `none`, and must
+  not be `lifecycleOnly` when the observation is `verified`. An `unverified`
+  observation is valid when the configuration read-back succeeded but the
+  separate post-restoration observation window was interrupted or inconclusive.
 - `phase=conflict` requires `lastError=externalPreferenceChange` and forbids
   any restoration write until a new user-authorized recovery action is
   defined.
@@ -336,8 +403,15 @@ Cross-field transaction invariants are mandatory:
 
 The command ledger is written in the same canonical store transition as the
 domain mutation. A repeated command name and idempotency key returns the
-stored outcome and performs no second domain mutation. A system side effect
-that can outlive a process boundary remains governed by its preference
+stored historical outcome and performs no second domain mutation or system
+side effect. For `requestBlockingAuthorization` and
+`recordManualReconnectIntent`, the dispatcher separately evaluates the
+current process-local effect: a historical success does not recreate an
+authorization object or a one-shot token after relaunch, logout, or reboot.
+The current response therefore reports `authorizationRequired`,
+`intentExpired`, or `intentUnavailable` when the volatile effect is absent,
+even though the durable command outcome remains successful. A system side
+effect that can outlive a process boundary remains governed by its preference
 transaction and reconciliation record; the command ledger is not used as a
 substitute for `Prepared`/`Applied` recovery. Completed command results older
 than the current cycle plus 90 days are purged with the event-retention
@@ -434,11 +508,23 @@ Tombstones are applied before LKG or recovery-copy profiles are exposed. An olde
 - Every `idempotencyKey` is unique within one `installationID` and one
   `commandName`; a duplicate key must resolve to the original
   `CommandResultRecord`.
+- When `releaseManifestID` is present for candidate or release evidence,
+  `releaseManifestSHA256`, `releaseAssetSHA256`, `appBundleSHA256`,
+  `executableSHA256`, and `buildManifestSHA256` must all be present and must
+  be compared as separate values; an executable digest cannot substitute for
+  the app-bundle digest.
 - `globalState.counterCapability=deterministicFailure` forces
   `globalState.safetyState=recoveryRequired` and forbids a measurement-only
   claim.
-- `globalState.safetyState=recoveryRequired` or
-  `timeAdjustmentRequired` forbids measurement and all network side effects.
+- `globalState.safetyState=recoveryRequired` forbids measurement and all
+  network side effects.
+- `globalState.safetyState=timeAdjustmentRequired` forbids measurement,
+  enforcement, suppression, disconnect, and new preference writes. It permits
+  only an ownership-proven cleanup restoration of an already open transaction
+  when the current configuration matches HBF's last-written fingerprint, the
+  archive validates, current-process authorization is available, and write,
+  read-back, and persistence guards succeed. Otherwise no preference write is
+  allowed.
 - `tombstoneDigest` is SHA-256 over the canonical sorted tombstone array,
   using the same UTF-8 JSON rules as Section 2.
 
@@ -471,6 +557,7 @@ Required checks:
 - Verify `storeRevision` never decreases relative to the LKG and installation marker metadata.
 - Verify `installationID` is stable across canonical, LKG, installation marker, and tombstone files.
 - Verify `tombstoneDigest` matches `tombstones.json`.
+- Verify the commit journal's installation id, target revision, phase, and recorded digests against every required destination file.
 - Verify every transaction fingerprint matches its archive.
 - Verify event sequences are nondecreasing and bound to store revisions.
 
@@ -480,7 +567,7 @@ If rollback is suspected, HBF enters `recoveryRequired` and offers explicit reco
 
 ## 7. Transaction Ordering
 
-The following transitions are atomic at the product-contract level. They may use multiple file replacements internally, but the UI must not report success unless every required file validates.
+The following transitions are atomic at the product-contract level. They may use multiple file replacements internally, but each transition must use `CommitJournalV1`, and the UI must not report success unless every required file and journal phase validates.
 
 | Transition | Required order |
 |---|---|
@@ -492,6 +579,13 @@ The following transitions are atomic at the product-contract level. They may use
 | Restoration | Check current fingerprint; write original; read back; then write `restored`; then start separate observation |
 | Profile deletion | Write tombstone with `purgeCompleted=false`; purge active/LKG/transactions/profile-scoped events; mark tombstone complete; append a global `profileDeletion` event with `profileID=null`; validate all files |
 | Recovery from LKG | Apply tombstones first; validate revision and installation id; then make selected copy canonical |
+
+For every row above, a crash after any listed file operation leaves the journal
+in the preceding phase or in a phase whose recorded digest does not match the
+destination. Launch recovery must preserve the files and enter
+`recoveryRequired`, except for the explicit incomplete-deletion continuation
+rule. A valid but newer canonical file is not sufficient evidence to resume a
+measurement transition without a matching journal phase and digest.
 
 ---
 
@@ -508,7 +602,7 @@ Local evidence is the source of truth for GitHub-candidate and release validatio
 | Fingerprints | Allowed | Allowed |
 | Authorization result | Allowed | Allowed, no credentials |
 | Packet contents, URLs, credentials, coordinates | Prohibited | Prohibited |
-| Exact GitHub asset/executable hash and actual signature identity | Allowed | Allowed |
+| Exact GitHub asset/app-bundle/executable hashes and actual signature identity | Allowed | Allowed |
 
 The report generator must fail if a `secretProhibited` event detail is present. HBF does not send remote telemetry in v1.
 

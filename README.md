@@ -9,7 +9,9 @@ Hotspot Byte Fence (HBF)은 macOS 메뉴 막대용 데이터 사용량 측정 �
 - GitHub Release에는 Developer ID 서명이나 notarization이 없는 unsigned ZIP을 게시합니다.
 - 지원되는 사용자 설치 절차에서는 압축을 푼 `.app`에 사용자가 자신의 Mac에서 ad hoc 서명을 해야 합니다.
 - ad hoc 서명은 Developer ID 서명이나 notarization을 대신하지 않습니다.
-- 지원 OS와 strong-blocking 여부는 GitHub Release 페이지와 게이트 보고서에 명시된 범위만 따릅니다.
+- v1의 호환성 검증 대상은 `macOS 13.0 이상 / arm64`이며, 실제 지원 OS는 게이트 보고서의 exact macOS build 행으로만 확정합니다.
+- 지원 OS와 strong-blocking 여부는 GitHub Release 페이지와 게이트 보고서에 명시된 범위만 따릅니다. Intel `x86_64`는 별도 검증 전까지 v1 범위에 포함하지 않습니다.
+- 아직 승인되지 않은 GitHub validation candidate는 `OperatorValidation`으로만 실행하며 보호 사용자용 strong-blocking 상태를 표시하지 않습니다.
 
 ## 설치
 
@@ -57,12 +59,25 @@ Finder에서 앱을 열고 macOS가 표시하는 첫 실행 및 로그인 항목
 
 ## 해시와 검증 범위
 
-Release의 SHA-256은 서명 전 unsigned ZIP을 확인하는 값입니다. 로컬 ad hoc 서명 뒤에는 앱 bundle과 실행 파일의 서명 상태 및 digest가 달라질 수 있으므로, 서명 후 값을 Release의 원본 asset SHA-256과 비교하지 않습니다.
+Release의 SHA-256은 서명 전 unsigned ZIP을 확인하는 값입니다. 로컬 ad hoc 서명 뒤에는 앱 bundle과 실행 파일의 서명 상태 및 digest가 달라질 수 있으므로, 서명 후 값을 Release의 원본 asset SHA-256과 비교하지 않습니다. 게이트 보고서는 서명 후 `.app` 전체를 `hbf-app-bundle-v1-sha256` 규칙으로 계산한 app-bundle digest와 실행 파일 digest를 별도로 기록합니다.
 
-사용자가 로컬에서 서명한 앱은 원본 GitHub asset에서 파생된 artifact입니다. 해당 앱이 strong-blocking 또는 measurement-capable release 검증을 통과했다고 주장하려면, 같은 서명 절차와 같은 post-signing digest를 사용한 게이트 보고서가 별도로 있어야 합니다.
+사용자가 로컬에서 서명한 앱은 원본 GitHub asset에서 파생된 artifact입니다. 해당 앱이 strong-blocking 또는 measurement-capable release 검증을 통과했다고 주장하려면, 같은 서명 절차와 같은 post-signing app-bundle 및 executable digest를 사용한 게이트 보고서가 별도로 있어야 합니다.
 
 ## 현재 안전성 고지
 
 문서와 SDK의 API 확인만으로는 실제 Wi-Fi 차단, 자동 재연결 억제, preference 복원, 권한 동작, 또는 장시간 counter 연속성이 입증되지 않습니다. 관련 게이트가 통과되기 전에는 strong-blocking을 보장하지 않습니다.
 
 자세한 요구사항과 검증 기준은 [PRD](docs/HotspotByteFence_PRD.md), [기술설계](docs/HotspotByteFence_TechnicalDesign.md), [capability gates](docs/HotspotByteFence_CapabilityGates.md), [검증 추적표](docs/HotspotByteFence_VerificationTraceability.md)를 확인합니다.
+
+## 현재 개발 상태
+
+현재 저장소에는 SwiftPM 기반의 안전한 core 단계가 구현되어 있습니다. 다음 명령으로 domain, measurement, parser, persistence 테스트를 실행할 수 있습니다.
+
+```sh
+swift test
+swift run HotspotByteFence
+swift run HotspotByteFence --probe-counter en0
+swift run HotspotByteFence --probe-identity
+```
+
+개발 빌드의 immutable `BuildManifestV1.compiledMode`는 `measurementOnly`입니다. `--probe-counter`와 `--probe-identity`는 read-only 진단 경로이며 Wi-Fi 설정 변경, disconnect, 자동 재연결 억제를 수행하지 않습니다. CoreWLAN identity 값이 현재 권한 또는 연결 상태에서 제공되지 않으면 측정 대상 identity를 추정하지 않고 unavailable 상태로 남깁니다. 강제 차단·preference 변경·실기기 후보 검증은 문서의 F/R 절차를 완료한 뒤 별도 단계에서 구현합니다.

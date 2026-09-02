@@ -1,0 +1,32 @@
+{
+  "expected": {
+    "rx": "4000000000",
+    "total": "9000000000",
+    "tx": "5000000000"
+  },
+  "layout": {
+    "dataOffset": 16,
+    "dataSize": 16,
+    "headerSize": 16,
+    "interfaceIndexOffset": 8,
+    "messageLengthOffset": 0,
+    "messageTypeOffset": 3,
+    "rxOffset": 0,
+    "txOffset": 8
+  },
+  "records": [
+    {
+      "index": 99,
+      "rx": "1",
+      "tx": "2",
+      "type": 1
+    },
+    {
+      "index": 4,
+      "rx": "4000000000",
+      "tx": "5000000000",
+      "type": 18
+    }
+  ],
+  "schemaVersion": 1
+}

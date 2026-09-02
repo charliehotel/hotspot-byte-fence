@@ -1,9 +1,9 @@
 # Hotspot Byte Fence (HBF) — Technical Design
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Product baseline:** `HotspotByteFence_PRD.md`  
-**Implementation status:** Domain and measurement implementation may begin; strong-blocking integration remains gated by the GitHub-candidate feasibility report.
+**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
 
 Required companion contracts:
 
@@ -17,11 +17,11 @@ Required companion contracts:
 
 ## 1. Approved Architecture Decision
 
-HBF v1 is a directly distributed GitHub Copy App: a non-sandboxed, `arm64` macOS application that uses public APIs only. The published GitHub package is an unsigned ZIP. Before supported use, the user must ad hoc-sign the extracted `.app` locally; this is an installation prerequisite for the supported path. Developer ID signing, notarization, and Hardened Runtime are not distribution prerequisites. The unsigned asset digest is verified before signing, and the post-signing app or executable digest is recorded separately. A locally signed app is a derived artifact and cannot inherit exact-candidate gate evidence unless that exact signed artifact is tested. The exact artifact's signature, Hardened Runtime, notarization, quarantine, and Gatekeeper results are recorded without turning them into mandatory Developer ID capability claims. HBF does not install a privileged helper or daemon.
+HBF v1 is a directly distributed GitHub Copy App: a non-sandboxed, `arm64` macOS application that uses public APIs only. The published GitHub package is an unsigned ZIP. Before supported use, the user must ad hoc-sign the extracted `.app` locally; this is an installation prerequisite for the supported path. Developer ID signing, notarization, and Hardened Runtime are not distribution prerequisites. The unsigned asset digest is verified before signing, and the post-signing app-bundle and executable digests are recorded separately. A locally signed app is a derived artifact and cannot inherit exact-candidate gate evidence unless that exact signed artifact is tested. The exact artifact's signature, Hardened Runtime, notarization, quarantine, and Gatekeeper results are recorded without turning them into mandatory Developer ID capability claims. HBF does not install a privileged helper or daemon.
 
 This posture is intentional. Strong blocking requires an administrator-authorized CoreWLAN configuration commit, while Authorization Services is unavailable to an App Sandbox process. `SFAuthorization` is created only for an explicit blocking authorization action, remains in memory, and is invalidated when it is no longer needed. A previous authorization result is audit history only; it cannot authorize a later process.
 
-The initial validation target is macOS 26.6.2 build 25G83 on `arm64`. The macOS 13.0 deployment target is a compilation floor, not a support claim.
+The v1 compatibility validation target is macOS 13.0 or later on `arm64`, covering Ventura 13, Sonoma 14, Sequoia 15, and Tahoe 26. The exact support matrix grants a support claim only to macOS build rows whose applicable gates have passed. The current initial validation row is macOS 26.6.2 build 25G83 on `arm64`; the macOS 13.0 deployment target remains the compilation floor. Intel `x86_64` remains outside v1 until its capability and release proof is repeated.
 
 ### 1.1 Assumptions
 
@@ -72,15 +72,15 @@ SwiftUI MenuBarExtra / Settings
 |---|---|---|
 | `AppCoordinator` | Lifecycle wiring, menu/settings presentation, user commands | `RuntimeEngine` |
 | `RuntimeEngine` | Serial event ordering and compositional state reduction | clock, lifecycle, adapters, store |
-| `WiFiIdentityAdapter` | Interface enumeration, SSID bytes, BSSID, optional link events, and polling snapshots | `CWWiFiClient`-vended interfaces plus injected observation clock |
-| `InterfaceCounterAdapter` | Checked 64-bit RX/TX snapshots by interface index/name | `NET_RT_IFLIST2`, `if_msghdr2`, `if_data64` |
+| `WiFiIdentityAdapter` | Interface enumeration, stable `IdentitySnapshotV1` double-reads, SSID bytes, BSSID, optional link events, and polling snapshots | `CWWiFiClient`-vended interfaces plus injected observation clock |
+| `InterfaceCounterAdapter` | Checked 64-bit RX/TX snapshots by interface index/name using the bounded mixed-record parser contract | `NET_RT_IFLIST2`, `if_msghdr2`, `if_data64` |
 | `CycleEngine` | Effective cycle, clock-adjustment detection, reset decisions | wall and monotonic clocks, calendar, time zone |
 | `MeasurementEngine` | Baseline ownership, delta checks, usage overflow checks | identity, counters, cycle |
 | `AuthorizationProvider` | Explicit in-memory administrator authorization | `SFAuthorization` |
 | `PreferenceCoordinator` | Configuration archive, fingerprint, commit, restoration | `CWConfiguration`, `commitConfiguration` |
 | `Disconnector` | Exact-target revalidation and current-interface disconnect | `CWInterface.disassociate()` |
 | `EnforcementEngine` | Limit transition, retry schedule, suppression observation, and observation-quality classification | authorization, preference, disconnector, observation source |
-| `PersistenceStore` | Atomic durable state, LKG recovery, migrations, tombstones | application-support filesystem |
+| `PersistenceStore` | Atomic durable state, LKG recovery, migrations, tombstones, and `CommitJournalV1` recovery | application-support filesystem |
 | `NotificationService` | Authorization, success/failure notifications, throttle | `UNUserNotificationCenter` |
 | `LoginItemService` | Login registration and status | `SMAppService.mainApp` |
 
@@ -129,7 +129,7 @@ HBF does not use one flat application-state enum. The runtime snapshot combines 
 
 ### 4.1 Global precedence
 
-`RecoveryRequired` and `TimeAdjustmentRequired` stop measurement and every network action. `MultipleProfilesConnected` is application-global for state presentation, but stops measurement and blocking only for the currently resolved target set until one target remains. Profile management and settings remain available. A local `MeasurementUnavailable` stops only the affected target but cannot override a global state.
+`RecoveryRequired` stops measurement and every network action. `TimeAdjustmentRequired` stops measurement, enforcement, suppression, disconnect, and new preference writes, but permits only ownership-proven cleanup restoration of an already open HBF transaction under the normal archive, fingerprint, current-process authorization, read-back, and persistence guards. `MultipleProfilesConnected` is application-global for state presentation, but stops measurement and blocking only for the currently resolved target set until one target remains. Profile management and settings remain available. A local `MeasurementUnavailable` stops only the affected target but cannot override a global state.
 
 ### 4.2 Selected, connected, and enforced profiles
 
@@ -149,30 +149,30 @@ For each nominal five-second tick while awake:
 1. Resolve all Wi-Fi interfaces through the long-lived `CWWiFiClient`.
 2. Apply global recovery, permission, ambiguity, and multi-target rules.
 3. Calculate the current profile cycle before reading or applying a delta.
-4. Obtain the exact target interface index and checked `UInt64` RX/TX counters.
-5. Reject the sample on parse failure, index mismatch, counter regression, checked-add overflow, identity change, lifecycle boundary, or cycle boundary.
+4. Obtain a stable `IdentitySnapshotV1` and the exact target interface index, then read checked `UInt64` RX/TX counters through the normative `NET_RT_IFLIST2` parser.
+5. Reject the sample on snapshot-coherence failure, parse failure, index/name mismatch, counter regression, checked-add overflow, identity change, lifecycle boundary, or cycle boundary.
 6. When no trusted baseline exists, persist a new baseline and add no traffic.
 7. Otherwise compute checked RX and TX deltas, checked total delta, and checked accumulated usage.
-8. Persist the new usage and baseline according to the five-second/10 MB rule.
+8. Durably persist the new usage and baseline on the five-second cadence; if this valid sample observes at least 10 MB of newly measured traffic since the previous durable snapshot, flush this same transition immediately.
 9. Evaluate the exact-byte limit after the durable measurement transition.
 
-`MeasurementUnavailable` is used only for a transient failure on a capability already proven for the exact GitHub candidate artifact. A deterministic capability failure enters global `RecoveryRequired`.
+`MeasurementUnavailable` is used only for a transient failure on a capability already proven for the exact GitHub candidate artifact. A deterministic capability failure enters global `RecoveryRequired`. The 10 MB trigger applies only to newly observed counter deltas and is not a continuous bound on physical traffic between samples; it does not create a second sampler or permit deferring the mandatory five-second flush. After the required sample transition is durably validated, `bytesSinceLastFlush` is reset. The UI and relaunch recovery path must disclose the observation boundary.
 
 ---
 
 ## 6. Strong-Blocking Transaction
 
-The production and operator-validation paths use the same transaction logic.
+The production and operator-validation paths share the same guarded transaction algorithm. `OperatorValidation` is a separate process-local lifecycle and status overlay; it can never produce a protected user release or a `StrongBlockingReady` protection state.
 
 1. Persist the profile's limit-reached transition.
-2. Re-read the exact interface, SSID bytes, and BSSID.
+2. Obtain a fresh, coherent `IdentitySnapshotV1` for the exact interface, SSID bytes, and BSSID.
 3. Read the complete public `CWConfiguration` and create immutable original and intended archives.
 4. Compute versioned fingerprints over every public field represented by the archive.
 5. If target entries are present, persist and flush `Prepared` before any system write.
-6. Revalidate the exact target immediately before `commitConfiguration`.
+6. Obtain and revalidate a fresh `IdentitySnapshotV1` immediately before `commitConfiguration`.
 7. Commit with the in-memory `SFAuthorization`, read back, and compare the complete intended configuration.
 8. Mark `Applied` only after read-back succeeds. When the target entry was already absent, record a verified no-op without an applied transaction.
-9. Re-read the current identity immediately before `disassociate()`.
+9. Obtain a fresh, coherent `IdentitySnapshotV1` immediately before `disassociate()`.
 10. Call `disassociate()` only when the final observation still matches the exact target. If it does not, make no call. Because the public API has no atomic target guard, the implementation must not claim that this pre-call check eliminates the residual target-switch window; that boundary remains a release-gate result.
 11. Query again until the target is confirmed absent or the bounded verification attempt fails.
 12. Observe the interface for 30 awake seconds. A reconnect without a valid one-shot manual-intent token fails suppression.
@@ -183,9 +183,9 @@ Because `CWInterface.disassociate()` acts on the interface's current network and
 
 ### 6.1 Candidate gate
 
-The candidate executable is launched in explicit operator-validation context. Each destructive network case requires a fresh warning and confirmation. The UI displays `Validation Candidate`. The artifact may be distributed only with its measured mode and gate status declared; it cannot claim strong blocking until its identity, counter, suppression, preservation, and restoration reports pass.
+The candidate executable is launched only through an explicit operator-validation context. The runner creates a process-local `OperatorValidationContextV1` containing the run identifier, candidate digest set, gate/case identifier, and fresh confirmation immediately before each destructive case. The candidate must reject every destructive network action when that context is absent, stale, or mismatched. Each case also requires a fresh warning and confirmation, and the UI displays `Validation Candidate`; while this lifecycle is active, the protection projection is never `StrongBlockingReady` and no persisted record may claim it. The artifact may be distributed only with its measured mode and gate status declared; it cannot claim strong blocking until its identity, counter, suppression, preservation, and restoration reports pass.
 
-The report is bound to application version, source revision, GitHub release asset SHA-256, actual code-signature status, architecture, and exact macOS build. Notarization or stapling, when present, must not replace or rebuild the tested executable.
+The report is bound to application version, source revision, GitHub release asset SHA-256, tested post-signing app-bundle and executable SHA-256 values when applicable, actual code-signature status, architecture, and exact macOS build. Notarization or stapling, when present, must not replace or rebuild the tested executable or app bundle.
 
 ### 6.2 Observation implementation
 
@@ -207,7 +207,7 @@ Restoration does not require the target SSID or BSSID to remain connected. It re
 
 If ownership matches, HBF writes the original configuration and verifies the complete read-back before marking the transaction `Restored`. If ownership differs, it performs no write and enters `Conflict`. Decode or read-back uncertainty enters `Unverified`.
 
-After verified read-back, HBF separately observes network state for 30 awake seconds. A macOS-initiated or unclassified reconnection is an expected possible consequence of restoring automatic connection and does not invalidate configuration restoration. An interrupted window changes only the observation result to `Unverified`.
+After verified read-back, HBF separately observes network state for 30 awake seconds. A macOS-initiated or unclassified reconnection is an expected possible consequence of restoring automatic connection and does not invalidate configuration restoration. An interrupted window changes only the observation result to `Unverified`; the transaction phase remains `Restored`.
 
 ---
 
@@ -223,8 +223,9 @@ All files reside in the app's Application Support directory, whose directory mod
 | `state.lkg.json` | Last-known-good validated revision |
 | `installation.json` | Crash-safe completed-profile marker |
 | `tombstones.json` | Deleted stable profile identifiers and deletion revision |
+| `commit-journal.json` | Cross-file transition phase, target revision, and validated digests |
 
-Temporary replacement files use unique names in the same directory. A commit writes and flushes the temporary file, atomically replaces the destination, validates the decoded revision, and updates the LKG copy only after canonical validation succeeds.
+Temporary replacement files use unique names in the same directory. A single-file commit writes and flushes the temporary file, atomically replaces the destination, and validates the decoded revision. Any transition that replaces more than one file first writes and flushes `CommitJournalV1` in `prepared` phase, advances and flushes the journal after each validated replacement, and marks it `complete` only after all cross-file invariants validate. The LKG copy is updated only after canonical validation succeeds.
 
 The concrete file modes, symlink/path checks, schema fields, serialization formats, migration rules, LKG selection, tombstone ordering, local-evidence storage, redacted-report generation, and anti-rollback scope are defined in [`HotspotByteFence_PersistenceSchema.md`](HotspotByteFence_PersistenceSchema.md). This technical design must not be implemented with looser records than that schema.
 
@@ -260,6 +261,7 @@ Every byte count and revision that can exceed JSON's exact integer range is enco
 - Recovery never replaces known usage with zero.
 - A completed-profile commit validates the store before writing the installation marker.
 - Profile deletion first commits a tombstone, then purges active/LKG records, transactions, and profile-scoped events, and finally appends only a global deletion event with `profileID=null`.
+- A non-complete, required-but-missing, or digest-mismatched `CommitJournalV1` enters `RecoveryRequired` at launch; HBF preserves candidate files and does not select a lower or merely newer copy automatically. Only an incomplete deletion purge may continue from its durable tombstone, with the deleted profile hidden until validation.
 - Recovery-copy selection applies tombstones before exposing profiles.
 - Authorization objects, credentials, packet contents, URLs, and geographic coordinates are never persisted.
 
@@ -310,7 +312,9 @@ The manifest is canonical UTF-8 JSON with sorted keys and no insignificant white
 
 The external `ReleaseManifestV1` is maintained by the release process. Its exact schema is fixed below:
 
-In this schema, `releaseAssetSHA256` identifies the published unsigned ZIP, while `executableSHA256` identifies the exact executable used for the candidate or release test. When the tested path includes local ad hoc signing, the latter is the post-signing executable digest and the signing procedure and actual signature state must be recorded with the evidence.
+In this schema, `releaseAssetSHA256` identifies the published unsigned ZIP, while `appBundleSHA256` and `executableSHA256` identify the exact app bundle and executable used for the candidate or release test. When the tested path includes local ad hoc signing, both values are measured after signing, and the signing procedure and actual signature state must be recorded with the evidence. A missing app-bundle digest is not substituted with an executable digest.
+
+`appBundleSHA256` uses the algorithm identifier `hbf-app-bundle-v1-sha256`. Its input is canonical UTF-8 JSON for every non-directory entry under the tested `.app`, sorted by a relative UTF-8 path normalized to Unicode NFC, with entry type, relative path, mode, size, regular-file byte SHA-256, or symlink target as applicable. Relative paths use `/` separators, cannot escape the bundle, and are not followed during traversal. Extended attributes, quarantine state, and filesystem timestamps are excluded from this digest and are recorded separately. This binds nested executables, `_CodeSignature`, resources, `Info.plist`, and other bundle contents without depending on archive metadata.
 
 ```text
 ReleaseManifestV1
@@ -321,6 +325,7 @@ ReleaseManifestV1
   sourceRevision: nonempty String
   githubReleaseTag: nonempty String
   releaseAssetSHA256: SHA256Hex
+  appBundleSHA256: SHA256Hex
   executableSHA256: SHA256Hex
   embeddedBuildManifestSHA256: SHA256Hex
   architecture: arm64
@@ -339,9 +344,13 @@ SupportRowV1
   macOSBuild: String
   architecture: arm64
   supportStatus: strongBlocking | measurementOnly | unsupported
+
+ObservationGateReportV1
+  preflight: { digest: SHA256Hex, verdict: PASS | FAIL | PENDING | BLOCKED }
+  classification: { digest: SHA256Hex or null, verdict: PASS | FAIL | PENDING | BLOCKED }
 ```
 
-`GateID` is exactly one of `F-01` through `F-12` or `R-01` through `R-15`. Both gate objects contain the complete fixed key set in lexicographic order. A null report digest is allowed only for a gate that is not applicable or has not run; `approvedStrongBlocking` requires every F/R digest to be non-null and every corresponding verdict to be `PASS`. `releaseStatus=measurementOnly` requires the identity and counter capability gates to be `PASS` and forbids a strong-blocking claim. `releaseStatus=validationCandidate` cannot be distributed as a protected user release.
+`GateID` is exactly one of `F-01` through `F-12` or `R-01` through `R-15`. Both gate objects contain the complete fixed key set in lexicographic order. The F-12 report is a canonical `ObservationGateReportV1` with separate `preflight` and `classification` records, each containing its phase digest and verdict. `gateReportSHA256[F-12]` is the digest of that complete phase report. The aggregate `gateVerdicts[F-12]` is `PASS` only when both phases are `PASS`; it remains `PENDING` when preflight passes but classification is not yet bound to the applicable R cases. Candidate integration may use the separate preflight verdict, but strong-blocking release approval requires the aggregate F-12 verdict to be `PASS`. A null report digest is allowed only for a gate that is not applicable or has not run; `approvedStrongBlocking` requires every F/R digest to be non-null and every corresponding verdict to be `PASS`, and the app-bundle and executable digests must match the tested artifact. `releaseStatus=measurementOnly` requires the identity and counter capability gates to be `PASS`, requires the strong-blocking gate to be `FAIL`, requires the embedded `BuildManifestV1.compiledMode` to be `measurementOnly` in a separately built artifact, and forbids a strong-blocking claim. `releaseStatus=validationCandidate` cannot be distributed as a protected user release.
 
 The canonical external manifest is UTF-8 JSON with no insignificant whitespace, lexicographically sorted object keys, the declared array order for `macOSSupportRows`, and explicit nulls and enum strings. `releaseManifestSHA256` is the SHA-256 of those canonical bytes and is recorded outside the manifest; it is not a self-referential field. A strong-blocking distribution claim is valid only when all fields and hashes match the tested candidate without rebuilding the executable. The release manifest is not read from the mutable application store to enable blocking; the release process is the authority for what is distributed and claimed.
 
@@ -349,13 +358,13 @@ The artifact lifecycle is therefore:
 
 1. Build the exact executable with `BuildManifestV1` and the selected compiled mode.
 2. Publish that unchanged executable as the GitHub validation candidate and run the operator-only workflow.
-3. Bind the candidate's executable, embedded manifest, source revision, and asset digest to the F/R reports.
-4. Approve the unchanged artifact as `strongBlockingCapable` only when all required gates pass, or publish it as `measurementOnly` only when identity and counter gates pass and the strong-blocking gate fails.
+3. Bind the candidate's app bundle, executable, embedded manifest, source revision, and asset digest to the F/R reports; the operator-validation context must identify the same candidate digest set.
+4. Approve the unchanged `strongBlockingCapable` artifact only when all required gates pass. If identity and counter gates pass but the strong-blocking gate fails, build and publish a separate unchanged artifact whose embedded `BuildManifestV1.compiledMode` is `measurementOnly`; never relabel a strong-blocking-capable executable using only an external release status.
 5. Never let an external report, mutable store, user preference, or signature status promote a `measurementOnly` executable.
 
-When local user signing is part of the supported installation path, candidate evidence must bind both the published unsigned asset digest and the exact post-signing app or executable digest, together with the canonical signing procedure and its entitlements. A user-resigned copy without matching evidence is a derived local artifact and cannot inherit a strong-blocking or measurement-capable release claim solely from the unsigned GitHub asset.
+When local user signing is part of the supported installation path, candidate evidence must bind both the published unsigned asset digest and the exact post-signing app-bundle and executable digests, together with the canonical signing procedure and its entitlements. A user-resigned copy without matching evidence is a derived local artifact and cannot inherit a strong-blocking or measurement-capable release claim solely from the unsigned GitHub asset.
 
-The operator-validation launch context is process-local, explicit, and never persisted. It changes warnings and confirmation requirements only. It does not bypass capability checks, authorization, observation-quality rules, or transaction safety.
+The operator-validation launch context is process-local, explicit, and never persisted. `OperatorValidationContextV1` binds the current run identifier, app-bundle/executable/candidate digests, gate/case identifier, and fresh confirmation to the current process. The candidate rejects a destructive action when the context is absent, stale, or mismatched. The context changes warnings and confirmation requirements and projects `Validation Candidate`; it never exposes `StrongBlockingReady`, bypasses capability checks, authorization, observation-quality rules, or transaction safety, and is never read from persisted state, a mutable report, or a user preference.
 
 Runtime authorization availability is also runtime-only and not persisted. After relaunch, logout, or reboot, HBF may perform only a non-interactive check that cannot display a prompt. If that check cannot obtain a usable authorization, protection remains `BlockingNotGuaranteed` until the user invokes the explicit authorization action. Enforcement retries never prompt.
 
@@ -376,7 +385,8 @@ Runtime authorization availability is also runtime-only and not persisted. After
 ### 11.2 Adapter integration verification
 
 - CoreWLAN Swift mappings on the selected SDK
-- Interface-name/index matching for `NET_RT_IFLIST2`
+- Interface-name/index matching and bounded mixed-record parsing for `NET_RT_IFLIST2`
+- Coherent `IdentitySnapshotV1` double-read behavior across separate CoreWLAN getters and observation races
 - Configuration archive, decode, equality, and fingerprint determinism
 - Atomic file replacement and permission checks
 - Lifecycle and login-item status mappings

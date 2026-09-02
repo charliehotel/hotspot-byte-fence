@@ -1,12 +1,12 @@
 # Hotspot Byte Fence (HBF) — Real-Mac Operator Runbook
 
-**Version:** 0.2  
+**Version:** 0.3
 **Date:** 2026-09-01  
 **Status:** Procedure contract only. No candidate gate has been run.
 
-This runbook is the mandatory procedure for F-06 through F-12 and R-01 through R-15. It prevents destructive Wi-Fi actions from being mistaken for ordinary automated tests and defines the evidence needed for a candidate or release verdict.
+This runbook is the mandatory procedure for F-06 through F-12 and R-01 through R-15. It prevents destructive Wi-Fi actions from being mistaken for ordinary automated tests and defines the evidence needed for a candidate or release verdict. The v1 compatibility validation target is macOS 13.0 or later on `arm64`, but each supported claim requires an exact macOS build row and an independent candidate/release evidence binding.
 
-For this v1 policy, the operator verifies the published unsigned asset SHA-256 before extracting or signing it, applies the exact local ad hoc-signing procedure published in `README.md`, and records the resulting app or executable SHA-256 and actual signature state separately. The post-signing artifact is the exact candidate only when the gate record binds that digest; an arbitrary user-resigned copy cannot inherit a candidate or release verdict.
+For this v1 policy, the operator verifies the published unsigned asset SHA-256 before extracting or signing it, applies the exact local ad hoc-signing procedure published in `README.md`, and records the resulting app-bundle and executable SHA-256 values and actual signature state separately. The post-signing artifact is the exact candidate only when the gate record binds those digests; an arbitrary user-resigned copy cannot inherit a candidate or release verdict.
 
 ## 1. Safety rules
 
@@ -47,20 +47,22 @@ The implementation must provide one deterministic runner with this interface:
 
 ```text
 Scripts/hbf-gate-run preflight --candidate <path> --output <run-directory>
-Scripts/hbf-gate-run run --gate <F-01..F-11|F-12|R-01..R-15> [--phase preflight|classification] --run <run-directory>
+Scripts/hbf-gate-run run --gate <F-01..F-11|F-12|R-01..R-15> [--phase preflight|classification] [--case <case-id>] --run <run-directory>
 Scripts/hbf-gate-run report --run <run-directory>
 ```
 
 `--phase` is valid only with `--gate F-12`: `preflight` records observation capability and instrumentation before destructive cases, while `classification` consumes the applicable R-case observation records after the run. Every other gate uses a single phase.
 
-The runner may delegate destructive confirmation to the application UI, but it must not silently approve a case, synthesize an observation, or treat a mock adapter as candidate evidence.
+For every destructive gate case, `--case` is required and identifies the fixed case in the fixture/oracle matrix. The runner creates a process-local `OperatorValidationContextV1` for that case containing `schemaVersion=1`, `runID`, the exact unsigned-asset/app-bundle/executable/embedded-manifest digest set, `gateID`, `caseID`, and a fresh operator-confirmation record. The context is a test-workflow binding, not an authorization credential; the application still displays its warning and requires the operator's confirmation immediately before the action. The candidate must reject a destructive action when the context is absent, stale, or mismatched, and must not reconstruct it from persisted state, a mutable report, or a user preference. The context is never persisted; only its validation result and redacted identifiers are recorded in evidence.
+
+The runner may delegate destructive confirmation to the application UI, but it must not silently approve a case, synthesize an observation, or treat a mock adapter as candidate evidence. A candidate launched outside this context is not a strong-blocking or protected-user run.
 
 ## 4. Preflight sequence
 
-1. Record the application version, full source revision, exact GitHub asset and executable SHA-256, embedded `BuildManifestV1` SHA-256, bundle identifier, architecture, macOS version/build, signature/runtime/notarization status, quarantine state, Gatekeeper result, and available topology roles.
+1. Record the application version, full source revision, exact GitHub asset SHA-256, canonical post-signing app-bundle SHA-256 using `hbf-app-bundle-v1-sha256` when applicable, executable SHA-256, embedded `BuildManifestV1` SHA-256, bundle identifier, architecture, macOS version/build, signature/runtime/notarization status, quarantine state, Gatekeeper result, and available topology roles.
 2. Validate that the application is non-sandboxed, has the required `NSLocationUsageDescription`, and does not install a privileged helper or daemon.
 3. Record Location Services, notification authorization, and process-local administrator-authorization state without requesting an unapproved prompt.
-4. Record the canonical `T1` and `T2` identity hashes and confirm that the Mac is awake and no unrelated network operation is in progress.
+4. Record the canonical `T1` and `T2` identity hashes from coherent `IdentitySnapshotV1` reads and confirm that the Mac is awake and no unrelated network operation is in progress.
 5. Create the local evidence directory and verify that the application can write its owner-only state and evidence files.
 
 If any preflight value is unavailable, the affected gate remains `PENDING` or becomes `BLOCKED`; the operator must not fill it with an inferred value.
@@ -79,14 +81,17 @@ Run non-destructive and permission cases first, then run destructive cases one a
 8. R-01 through R-15: repeat the applicable candidate cases on the exact unchanged artifact and exact support-matrix row.
 9. F-12-classification: finalize F-12 from the applicable R-06/R-07/R-08 and R-10 observation records, including source, awake duration, maximum gap, and final target state.
 
-The F-12 preflight must pass with an event-backed path before R-06 or R-07 can be reported as a strong-blocking pass. Polling-only evidence may validate measurement or restoration observation behavior, but it cannot validate suppression of automatic reconnection. The preflight result is sufficient for gated candidate integration; the release verdict remains `PENDING` until `F-12-classification` evidence from the applicable R cases is bound to the same candidate.
+The F-12 preflight must pass with an event-backed path before R-06 or R-07 can be reported as a strong-blocking pass. Polling-only evidence may validate measurement or restoration observation behavior, but it cannot validate suppression of automatic reconnection. The preflight result is sufficient for gated candidate integration; the release verdict remains `PENDING` until `F-12-classification` evidence from the applicable R cases is bound to the same candidate. The resulting `ObservationGateReportV1` is the single canonical F-12 report, and its aggregate verdict is `PASS` only when both phase verdicts are `PASS`.
+
+If the runner cannot create or validate the current `OperatorValidationContextV1`, if the candidate presents `StrongBlockingReady` during operator validation, or if a destructive action is attempted without fresh confirmation, abort the run and mark the case `FAIL` or `BLOCKED` with the reason. Do not credit any partial side effect as a passing observation.
 
 ## 6. Required per-case record
 
 Each gate record must contain:
 
 - gate id, run id, start/end time, and operator confirmation time
-- exact candidate and manifest digests
+- exact unsigned-asset, app-bundle, executable, and manifest digests, with `hbf-app-bundle-v1-sha256` recorded when applicable
+- gate/case id and the `OperatorValidationContextV1` validation result; never the context itself
 - exact macOS version/build and architecture
 - topology role and redacted target identities
 - precondition and action result

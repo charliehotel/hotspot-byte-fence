@@ -8,6 +8,7 @@
 # macOS/Xcode build output
 DerivedData/
 build/
+.build/
 *.xcuserstate
 
 # Local configuration and credentials
