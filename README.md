@@ -71,7 +71,7 @@ Release의 SHA-256은 서명 전 unsigned ZIP을 확인하는 값입니다. 로�
 
 ## 현재 개발 상태
 
-현재 저장소에는 SwiftPM 기반의 안전한 core 단계가 구현되어 있습니다. 다음 명령으로 domain, measurement, parser, persistence, installation-marker/tombstone 교차 파일 전환, configuration archive, preference transaction 및 초기 `StoreEnvelopeV1` foundation 테스트를 실행할 수 있습니다. `StoreEnvelopeV1`은 아직 전체 v1 logical store가 아니며, 나머지 typed record와 cross-record invariant는 후속 단계에서 구현합니다.
+현재 저장소에는 SwiftPM 기반의 안전한 core 단계가 구현되어 있습니다. 다음 명령으로 domain, measurement, parser, persistence, installation-marker/tombstone 교차 파일 전환, configuration archive, preference transaction, profile 및 초기 `StoreEnvelopeV1` record 테스트를 실행할 수 있습니다. `StoreEnvelopeV1`에는 profile·global state·integrity 형식이 연결되어 있지만 아직 전체 v1 logical store가 아니며, artifact observation·command/notification/event 원장·canonical digest 바인딩과 나머지 cross-record invariant는 후속 단계에서 구현합니다.
 
 ```sh
 swift test

@@ -3,7 +3,7 @@
 **Version:** 0.3
 **Date:** 2026-09-01  
 **Normative source:** [`HotspotByteFence_PRD.md`](HotspotByteFence_PRD.md)  
-**Implementation status:** The SwiftPM core source, unit-test surface, initial `FX-Counter-001` fixture, typed installation-marker/tombstone cross-file persistence cases, platform-independent configuration archive cases, validated preference transaction lifecycle cases, and staged `StoreEnvelopeV1` foundation cases exist under `Sources/HotspotByteFenceCore` and `Tests/HotspotByteFenceCoreTests`. The full Xcode app, runtime harness, candidate runner, app bundle, and GitHub candidate artifact do not exist yet; F/R and complete D/I/UI/REP evidence remain pending.
+**Implementation status:** The SwiftPM core source, unit-test surface, initial `FX-Counter-001` fixture, typed installation-marker/tombstone cross-file persistence cases, platform-independent configuration archive cases, validated preference transaction lifecycle cases, profile/global-state/integrity record cases, and staged `StoreEnvelopeV1` foundation cases exist under `Sources/HotspotByteFenceCore` and `Tests/HotspotByteFenceCoreTests`. The full Xcode app, runtime harness, candidate runner, app bundle, and GitHub candidate artifact do not exist yet; F/R and complete D/I/UI/REP evidence remain pending.
 
 This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an implementation-facing test or GitHub-candidate gate. Local core test results are reported separately from F/R evidence; passing them does not credit a candidate or release gate. Real-Mac destructive execution follows [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md).
 
@@ -43,12 +43,12 @@ This matrix maps every PRD acceptance criterion, AC-01 through AC-81, to an impl
 
 | Surface | Required path or command | Pass oracle |
 |---|---|---|
-| Domain tests | `Tests/HotspotByteFenceCoreTests/` and `swift test` | Implemented core cases, including initial cross-file persistence, configuration archive, preference transaction, and staged envelope cases, pass with deterministic inputs and no system side effect; full `D-*` coverage remains pending |
+| Domain tests | `Tests/HotspotByteFenceCoreTests/` and `swift test` | Implemented core cases, including initial cross-file persistence, configuration archive, preference transaction, profile/global-state/integrity records, and staged envelope cases, pass with deterministic inputs and no system side effect; full `D-*` coverage remains pending |
 | Read-only counter probe | `swift run HotspotByteFence --probe-counter <interface>` | The current macOS returns checked `UInt64` RX/TX values through `NET_RT_IFLIST2`; this is local adapter evidence, not an F-04/F-05 candidate pass |
 | Read-only identity probe | `swift run HotspotByteFence --probe-identity` | Interfaces are enumerated without printing SSID/BSSID; unavailable identity remains unavailable and no network action occurs |
 | Adapter tests | `Tests/HotspotByteFenceTests/Adapters/` and `xcodebuild test -scheme HotspotByteFence -only-testing:HotspotByteFenceTests/Adapters` | All `I-*` cases pass on the selected SDK; this does not credit F/R |
 | UI tests | `Tests/HotspotByteFenceUITests/` and `xcodebuild test -scheme HotspotByteFence -only-testing:HotspotByteFenceUITests` | Accessibility identifiers, state snapshots, localization, and appearance checks pass |
-| Fixture assets | `Tests/HotspotByteFenceCoreTests/Fixtures/HotspotByteFence/` | The initial counter fixture, typed persistence cases, configuration archive cases, preference transaction cases, and staged envelope cases validate their local oracles; the remaining fixture families and negative corpus are pending |
+| Fixture assets | `Tests/HotspotByteFenceCoreTests/Fixtures/HotspotByteFence/` | The initial counter fixture, typed persistence cases, configuration archive cases, preference transaction cases, profile/global-state/integrity cases, and staged envelope cases validate their local oracles; the remaining fixture families and negative corpus are pending |
 | Report validator | `Scripts/validate-hbf-report` | Invalid schema, prohibited data, missing digest, or inconsistent verdict is rejected |
 | Candidate runner | `Scripts/hbf-gate-run` | It records the exact candidate, manifest, topology, oracle, and operator confirmation without synthesizing results; it launches destructive cases only with a matching process-local `OperatorValidationContextV1`, and the candidate never projects `StrongBlockingReady` in that lifecycle |
 | Real-Mac evidence | `QA/Evidence/<applicationVersion>/<macOSBuild>/<runID>/` | Local evidence and redacted report are both present and hash-bound to the candidate |

@@ -3,7 +3,7 @@
 **Version:** 0.3
 **Date:** 2026-09-01  
 **Normative source:** [`HotspotByteFence_PRD.md`](HotspotByteFence_PRD.md)  
-**Implementation status:** Initial typed persistence foundation is implemented under `Sources/HotspotByteFenceCore` with canonical JSON, owner-only permissions, LKG validation, journal phases, digest checks, explicit recovery results, installation-marker/tombstone cross-file transitions, the platform-independent `CWConfigurationArchiveV1` canonical archive/fingerprint/replay primitives, validated `PreferenceTransactionRecord` lifecycle states, and an initial `StoreEnvelopeV1` foundation containing the currently implemented revision, installation, language, tombstone-digest, and preference-transaction fields. The remaining envelope records, CoreWLAN SDK adapter/read-back path, full profile-reference purge validation, and command ledger remain pending.
+**Implementation status:** Initial typed persistence foundation is implemented under `Sources/HotspotByteFenceCore` with canonical JSON, owner-only permissions, LKG validation, journal phases, digest checks, explicit recovery results, installation-marker/tombstone cross-file transitions, the platform-independent `CWConfigurationArchiveV1` canonical archive/fingerprint/replay primitives, validated `PreferenceTransactionRecord` lifecycle states, and a staged `StoreEnvelopeV1` containing profiles with cycle/measurement/protection records, global safety state, and integrity shape/revision validation. The observed-artifact record, CoreWLAN SDK adapter/read-back path, command/notification/event ledgers, full profile-reference purge validation, and canonical envelope digest binding remain pending.
 
 This document defines the concrete v1 logical store. It must be implemented with typed Swift `Codable` records or stricter equivalent parsers. Ad hoc string manipulation is not acceptable at the persistence boundary. Real-Mac candidate execution and evidence handling follow [`HotspotByteFence_OperatorRunbook.md`](HotspotByteFence_OperatorRunbook.md).
 
@@ -71,7 +71,7 @@ StoreEnvelopeV1
 
 `storeRevision` increments by one for every successful canonical store transition. A transition that must atomically update another file, such as a tombstone or installation marker, records the external file revision and digest inside the event log.
 
-The current `StoreEnvelopeV1` source type is an explicitly staged foundation, not the complete logical v1 store described above. It serializes and validates only the fields already implemented in the core. `observedArtifact`, `globalState`, `profiles`, `commandResults`, `notificationState`, `eventLog`, and `integrity` will be added as their typed records and cross-record invariants are implemented; until then, the foundation tests do not establish complete v1-store validity or release readiness.
+The current `StoreEnvelopeV1` source type is an explicitly staged foundation, not the complete logical v1 store described above. It serializes and validates the implemented revision, installation, language, tombstone digest, global state, profile records, preference transactions, and integrity algorithm/digest-shape/revision relations. `observedArtifact`, `commandResults`, `notificationState`, and `eventLog` will be added with their typed records and cross-record invariants; canonical envelope digest self-binding and release readiness remain pending.
 
 ---
 

@@ -15,8 +15,12 @@ final class StoreEnvelopeTests: XCTestCase {
         XCTAssertTrue(json.contains("\"selectedProfileID\":null"))
         XCTAssertTrue(json.contains("\"lastError\":null"))
         XCTAssertTrue(json.contains("\"storeRevision\":\"2\""))
+        XCTAssertTrue(json.contains("\"globalState\""))
+        XCTAssertTrue(json.contains("\"integrity\""))
         XCTAssertEqual(envelope.storeRevision, DecimalUInt64(rawValue: 2))
         XCTAssertEqual(envelope.preferenceTransactions, [transaction])
+        XCTAssertEqual(envelope.globalState.safetyState, .normal)
+        XCTAssertEqual(envelope.integrity.lastValidatedRevision, envelope.storeRevision)
     }
 
     func testEnvelopeRejectsInvalidRevisionDigestAndDuplicateTransaction() throws {
@@ -117,17 +121,89 @@ final class StoreEnvelopeTests: XCTestCase {
         selectedProfileID: UUID? = nil,
         languageOverride: StoreLanguageOverrideV1 = .ko,
         preferenceTransactions: [PreferenceTransactionRecord] = [],
-        tombstoneDigest: String = String(repeating: "0", count: 64)
+        tombstoneDigest: String = String(repeating: "0", count: 64),
+        globalState: GlobalStateRecord? = nil,
+        integrity: IntegrityRecord? = nil
     ) throws -> StoreEnvelopeV1 {
-        try StoreEnvelopeV1(
+        let profileIDs = preferenceTransactions.reduce(into: [UUID]()) { result, transaction in
+            if !result.contains(transaction.profileID) {
+                result.append(transaction.profileID)
+            }
+        }
+        return try StoreEnvelopeV1(
             storeRevision: storeRevision,
             previousGoodRevision: previousGoodRevision,
             installationID: installationID,
             hasCompletedProfile: hasCompletedProfile,
+            globalState: try globalState ?? GlobalStateRecord(
+                safetyState: .normal,
+                recoveryReason: nil,
+                timeAdjustment: nil,
+                counterCapability: .pending,
+                identityCapability: .pending
+            ),
             selectedProfileID: selectedProfileID,
             languageOverride: languageOverride,
             preferenceTransactions: preferenceTransactions,
-            tombstoneDigest: tombstoneDigest
+            tombstoneDigest: tombstoneDigest,
+            profiles: try profileIDs.map(makeProfile),
+            integrity: try integrity ?? IntegrityRecord(
+                canonicalDigest: String(repeating: "a", count: 64),
+                lkgDigest: nil,
+                lastValidatedRevision: storeRevision,
+                previousValidatedRevision: previousGoodRevision.flatMap {
+                    $0.rawValue < storeRevision.rawValue ? $0 : nil
+                },
+                validatedAt: Date(timeIntervalSince1970: 20)
+            )
+        )
+    }
+
+    private func makeProfile(profileID: UUID) throws -> ProfileRecord {
+        try ProfileRecord(
+            profileID: profileID,
+            aliasNFC: "SIM",
+            ssidHex: "0102",
+            interfaceName: "en0",
+            confirmedBSSIDs: [try BSSID(string: "aa:bb:cc:dd:ee:ff")],
+            isComplete: true,
+            sharesInterfaceSSID: false,
+            limitBytes: ByteCount(10_000_000),
+            resetDay: 1,
+            cycle: try CycleRecord(
+                trustedCycleDate: "2026-09-01",
+                cycleStartInstant: Date(timeIntervalSince1970: 0),
+                timeZoneID: "Asia/Seoul",
+                lastTrustedWallClock: Date(timeIntervalSince1970: 15),
+                timeAcknowledgementRequired: false
+            ),
+            measurement: try MeasurementRecord(
+                usageBytes: ByteCount(0),
+                baselinePending: true,
+                lastTrustedIdentity: nil,
+                lastRXBytes: nil,
+                lastTXBytes: nil,
+                lastSampleWallClock: nil,
+                lastPersistedUsageAt: Date(timeIntervalSince1970: 10),
+                bytesSinceLastFlush: ByteCount(0)
+            ),
+            protection: try ProtectionRecord(
+                limitReached: false,
+                pauseBlocking: false,
+                blockingCapability: .measurementOnly,
+                lastAuthorizationOutcome: .neverRequested,
+                retry: try RetryRecord(
+                    state: .none,
+                    attemptIndex: 0,
+                    nextEligibleAt: nil,
+                    lastAttemptAt: nil
+                ),
+                lastSuppressionObservation: nil,
+                lastFailureReason: nil,
+                ownedTransactionID: nil
+            ),
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 10)
         )
     }
 
