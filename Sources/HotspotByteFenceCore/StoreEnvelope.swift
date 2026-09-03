@@ -22,6 +22,8 @@ public enum StoreEnvelopeValidationError: Error, Equatable, Sendable {
     case eventProfileMissing
     case duplicateCommandIdempotencyKey
     case missingNullableField
+    case profileNotFound
+    case integrityDigestMismatch
 }
 
 public enum StoreLanguageOverrideV1: String, Codable, Equatable, Sendable {
@@ -265,6 +267,189 @@ public struct StoreEnvelopeV1: Codable, Equatable, Sendable, VersionedDocument {
               integrity.previousValidatedRevision == previousGoodRevision else {
             throw StoreEnvelopeValidationError.invalidIntegrity
         }
+    }
+
+    public func unhashed() throws -> StoreEnvelopeV1 {
+        try StoreEnvelopeV1(
+            storeRevision: storeRevision,
+            previousGoodRevision: previousGoodRevision,
+            installationID: installationID,
+            hasCompletedProfile: hasCompletedProfile,
+            observedArtifact: observedArtifact,
+            globalState: globalState,
+            selectedProfileID: selectedProfileID,
+            languageOverride: languageOverride,
+            profiles: profiles,
+            preferenceTransactions: preferenceTransactions,
+            commandResults: commandResults,
+            notificationState: notificationState,
+            eventLog: eventLog,
+            tombstoneDigest: tombstoneDigest,
+            integrity: try integrity.unhashed()
+        )
+    }
+
+    public func canonicalStoreDigest() throws -> String {
+        let unhashedEnvelope = try unhashed()
+        let data = try StoreJSONCodec.encode(unhashedEnvelope)
+        return StoreJSONCodec.sha256Hex(data)
+    }
+
+    public func withSelfBoundDigest(
+        lkgDigest: String? = nil,
+        validatedAt: Date? = nil
+    ) throws -> StoreEnvelopeV1 {
+        let effectiveDate = validatedAt ?? integrity.validatedAt
+        let unhashedIntegrity = try IntegrityRecord(
+            algorithm: IntegrityRecord.algorithm,
+            canonicalDigest: nil,
+            lkgDigest: nil,
+            lastValidatedRevision: storeRevision,
+            previousValidatedRevision: previousGoodRevision,
+            validatedAt: effectiveDate
+        )
+        let unhashedEnvelope = try StoreEnvelopeV1(
+            storeRevision: storeRevision,
+            previousGoodRevision: previousGoodRevision,
+            installationID: installationID,
+            hasCompletedProfile: hasCompletedProfile,
+            observedArtifact: observedArtifact,
+            globalState: globalState,
+            selectedProfileID: selectedProfileID,
+            languageOverride: languageOverride,
+            profiles: profiles,
+            preferenceTransactions: preferenceTransactions,
+            commandResults: commandResults,
+            notificationState: notificationState,
+            eventLog: eventLog,
+            tombstoneDigest: tombstoneDigest,
+            integrity: unhashedIntegrity
+        )
+        let digest = try unhashedEnvelope.canonicalStoreDigest()
+        let newIntegrity = try IntegrityRecord(
+            algorithm: IntegrityRecord.algorithm,
+            canonicalDigest: digest,
+            lkgDigest: lkgDigest,
+            lastValidatedRevision: storeRevision,
+            previousValidatedRevision: previousGoodRevision,
+            validatedAt: effectiveDate
+        )
+        return try StoreEnvelopeV1(
+            storeRevision: storeRevision,
+            previousGoodRevision: previousGoodRevision,
+            installationID: installationID,
+            hasCompletedProfile: hasCompletedProfile,
+            observedArtifact: observedArtifact,
+            globalState: globalState,
+            selectedProfileID: selectedProfileID,
+            languageOverride: languageOverride,
+            profiles: profiles,
+            preferenceTransactions: preferenceTransactions,
+            commandResults: commandResults,
+            notificationState: notificationState,
+            eventLog: eventLog,
+            tombstoneDigest: tombstoneDigest,
+            integrity: newIntegrity
+        )
+    }
+
+    public func validateSelfBinding() throws {
+        guard let canonicalDigest = integrity.canonicalDigest else {
+            throw StoreEnvelopeValidationError.integrityDigestMismatch
+        }
+        let expectedDigest = try canonicalStoreDigest()
+        guard canonicalDigest == expectedDigest else {
+            throw StoreEnvelopeValidationError.integrityDigestMismatch
+        }
+    }
+
+    public func purgingProfile(
+        id: UUID,
+        newRevision: DecimalUInt64,
+        deletedAt: Date = Date(),
+        tombstoneDigest: String
+    ) throws -> StoreEnvelopeV1 {
+        guard profiles.contains(where: { $0.profileID == id }) else {
+            throw StoreEnvelopeValidationError.profileNotFound
+        }
+        guard newRevision.rawValue > storeRevision.rawValue else {
+            throw StoreEnvelopeValidationError.invalidRevision
+        }
+        guard PersistenceDigest.isValid(tombstoneDigest) else {
+            throw StoreEnvelopeValidationError.invalidTombstoneDigest
+        }
+
+        let updatedProfiles = profiles.filter { $0.profileID != id }
+        let updatedTransactions = preferenceTransactions.filter { $0.profileID != id }
+        let updatedNotificationStates = notificationState.profileNotificationStates.filter { $0.key != id }
+        let updatedNotificationState = NotificationStateRecord(
+            profileNotificationStates: updatedNotificationStates,
+            systemAuthorization: notificationState.systemAuthorization
+        )
+
+        let deletedTransactionIDs = Set(preferenceTransactions.filter { $0.profileID == id }.map(\.transactionID))
+        var remainingEvents = eventLog.events.filter { event in
+            if event.profileID == id { return false }
+            if let txID = event.transactionID, deletedTransactionIDs.contains(txID) { return false }
+            return true
+        }
+
+        let nextSequence = DecimalUInt64(rawValue: (remainingEvents.last?.sequence.rawValue ?? 0) + 1)
+        let deletionEvent = try EventRecord(
+            sequence: nextSequence,
+            storeRevision: newRevision,
+            occurredAt: deletedAt,
+            profileID: nil,
+            transactionID: nil,
+            kind: .profileDeletion,
+            redactionClass: .public,
+            details: EventDetailsV1(
+                reason: .profileDeleted,
+                oldState: "active",
+                newState: "purged",
+                storeRevision: newRevision
+            )
+        )
+        remainingEvents.append(deletionEvent)
+        let updatedEventLog = try EventLogRecord(
+            retentionPolicy: eventLog.retentionPolicy,
+            events: remainingEvents
+        )
+
+        let updatedSelectedProfileID = (selectedProfileID == id) ? nil : selectedProfileID
+        let hasCompleted = updatedProfiles.contains(where: \.isComplete)
+
+        let interimIntegrity = try IntegrityRecord(
+            algorithm: IntegrityRecord.algorithm,
+            canonicalDigest: nil,
+            lkgDigest: integrity.canonicalDigest,
+            lastValidatedRevision: newRevision,
+            previousValidatedRevision: storeRevision,
+            validatedAt: deletedAt
+        )
+
+        let interimEnvelope = try StoreEnvelopeV1(
+            storeRevision: newRevision,
+            previousGoodRevision: storeRevision,
+            installationID: installationID,
+            hasCompletedProfile: hasCompleted,
+            observedArtifact: observedArtifact,
+            globalState: globalState,
+            selectedProfileID: updatedSelectedProfileID,
+            languageOverride: languageOverride,
+            profiles: updatedProfiles,
+            preferenceTransactions: updatedTransactions,
+            commandResults: commandResults,
+            notificationState: updatedNotificationState,
+            eventLog: updatedEventLog,
+            tombstoneDigest: tombstoneDigest,
+            integrity: interimIntegrity
+        )
+
+        return try interimEnvelope.withSelfBoundDigest(
+            lkgDigest: integrity.canonicalDigest,
+            validatedAt: deletedAt
+        )
     }
 
     enum CodingKeys: String, CodingKey {

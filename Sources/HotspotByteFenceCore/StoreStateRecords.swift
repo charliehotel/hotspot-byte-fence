@@ -179,7 +179,7 @@ public struct IntegrityRecord: Codable, Equatable, Sendable {
     public static let algorithm = "hbf-store-v1-sha256"
 
     public let algorithm: String
-    public let canonicalDigest: String
+    public let canonicalDigest: String?
     public let lkgDigest: String?
     public let lastValidatedRevision: DecimalUInt64
     public let previousValidatedRevision: DecimalUInt64?
@@ -187,7 +187,7 @@ public struct IntegrityRecord: Codable, Equatable, Sendable {
 
     public init(
         algorithm: String = IntegrityRecord.algorithm,
-        canonicalDigest: String,
+        canonicalDigest: String? = nil,
         lkgDigest: String?,
         lastValidatedRevision: DecimalUInt64,
         previousValidatedRevision: DecimalUInt64?,
@@ -204,12 +204,17 @@ public struct IntegrityRecord: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        guard container.contains(.lkgDigest), container.contains(.previousValidatedRevision) else {
+        guard container.contains(.canonicalDigest),
+              container.contains(.lkgDigest),
+              container.contains(.previousValidatedRevision) else {
             throw IntegrityRecordValidationError.missingNullableField
+        }
+        guard let canonicalDigest = try container.decodeIfPresent(String.self, forKey: .canonicalDigest) else {
+            throw IntegrityRecordValidationError.invalidDigest
         }
         try self.init(
             algorithm: container.decode(String.self, forKey: .algorithm),
-            canonicalDigest: container.decode(String.self, forKey: .canonicalDigest),
+            canonicalDigest: canonicalDigest,
             lkgDigest: container.decodeIfPresent(String.self, forKey: .lkgDigest),
             lastValidatedRevision: container.decode(
                 DecimalUInt64.self,
@@ -226,7 +231,7 @@ public struct IntegrityRecord: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(algorithm, forKey: .algorithm)
-        try container.encode(canonicalDigest, forKey: .canonicalDigest)
+        try encodeExplicitOptional(canonicalDigest, in: &container, forKey: .canonicalDigest)
         try encodeExplicitOptional(lkgDigest, in: &container, forKey: .lkgDigest)
         try container.encode(lastValidatedRevision, forKey: .lastValidatedRevision)
         try encodeExplicitOptional(
@@ -241,8 +246,12 @@ public struct IntegrityRecord: Codable, Equatable, Sendable {
         guard algorithm == Self.algorithm else {
             throw IntegrityRecordValidationError.invalidAlgorithm
         }
-        guard PersistenceDigest.isValid(canonicalDigest),
-              lkgDigest.map(PersistenceDigest.isValid) ?? true else {
+        if let canonicalDigest {
+            guard PersistenceDigest.isValid(canonicalDigest) else {
+                throw IntegrityRecordValidationError.invalidDigest
+            }
+        }
+        guard lkgDigest.map(PersistenceDigest.isValid) ?? true else {
             throw IntegrityRecordValidationError.invalidDigest
         }
         if let previousValidatedRevision,
@@ -252,6 +261,17 @@ public struct IntegrityRecord: Codable, Equatable, Sendable {
         guard validatedAt.timeIntervalSince1970.isFinite else {
             throw IntegrityRecordValidationError.invalidDate
         }
+    }
+
+    public func unhashed() throws -> IntegrityRecord {
+        try IntegrityRecord(
+            algorithm: algorithm,
+            canonicalDigest: nil,
+            lkgDigest: nil,
+            lastValidatedRevision: lastValidatedRevision,
+            previousValidatedRevision: previousValidatedRevision,
+            validatedAt: validatedAt
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
