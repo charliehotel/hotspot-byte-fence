@@ -3,7 +3,7 @@
 **Version:** 0.3
 **Date:** 2026-09-01  
 **Product baseline:** `HotspotByteFence_PRD.md`  
-**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation, including installation-marker/tombstone cross-file transitions, platform-independent CoreWLAN configuration archive primitives, validated preference transaction lifecycle states, profile/cycle/measurement/protection records, global safety state, and integrity revision validation, are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
+**Implementation status:** The SwiftPM core shell, immutable build manifest, domain/measurement types, deterministic counter parser, read-only macOS identity/counter adapters, and initial typed persistence foundation, including installation-marker/tombstone cross-file transitions, platform-independent CoreWLAN configuration archive primitives, validated preference transaction lifecycle states, profile/cycle/measurement/protection records, global safety state, artifact observation, command results, notification state, event log records, and integrity revision validation, are implemented. Runtime coordination and strong-blocking integration remain gated by the GitHub-candidate feasibility report.
 
 Required companion contracts:
 
@@ -255,7 +255,7 @@ Every byte count and revision that can exceed JSON's exact integer range is enco
 
 `ProfileRecord`, `PreferenceTransaction`, `CommandResultRecord`, `notificationState`, `events`, `tombstoneDigest`, and `integrity` are not placeholder implementation choices. Their v1 fields, required/nullable status, enum values, archive format, fingerprint algorithm id, transaction ordering, event retention, and privacy/redaction classes are fixed in [`HotspotByteFence_PersistenceSchema.md`](HotspotByteFence_PersistenceSchema.md).
 
-The current `StoreEnvelopeV1` implementation is a staged persistence foundation. It currently carries the implemented revision, installation, language, tombstone-digest, global-state, profile, preference-transaction, and integrity-shape fields; it must not be treated as a complete logical store until artifact observation, command/notification/event records, canonical digest binding, and the remaining cross-record invariants are implemented.
+The current `StoreEnvelopeV1` implementation serializes and validates all typed v1 envelope sections: revision, installation, language, tombstone-digest, global-state, profile, preference-transaction, artifact observation, command-result, notification-state, event-log, and integrity-shape fields; canonical digest binding and candidate release gates remain pending.
 
 ### 8.3 Recovery and deletion
 

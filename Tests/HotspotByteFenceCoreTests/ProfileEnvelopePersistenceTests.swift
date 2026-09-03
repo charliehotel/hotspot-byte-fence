@@ -10,12 +10,14 @@ final class ProfileEnvelopePersistenceTests: XCTestCase {
             storeRevision: DecimalUInt64(rawValue: 2),
             installationID: UUID(),
             hasCompletedProfile: true,
+            observedArtifact: try makeArtifactObservation(),
             globalState: try makeGlobalState(),
             selectedProfileID: profile.profileID,
             languageOverride: .ko,
-            preferenceTransactions: [transaction],
-            tombstoneDigest: String(repeating: "0", count: 64),
             profiles: [profile],
+            preferenceTransactions: [transaction],
+            eventLog: try EventLogRecord(),
+            tombstoneDigest: String(repeating: "0", count: 64),
             integrity: try makeIntegrity()
         )
 
@@ -28,11 +30,13 @@ final class ProfileEnvelopePersistenceTests: XCTestCase {
                 storeRevision: DecimalUInt64(rawValue: 2),
                 installationID: UUID(),
                 hasCompletedProfile: true,
+                observedArtifact: try makeArtifactObservation(),
                 globalState: try makeGlobalState(),
                 languageOverride: .ko,
-                preferenceTransactions: [transaction],
-                tombstoneDigest: String(repeating: "0", count: 64),
                 profiles: [],
+                preferenceTransactions: [transaction],
+                eventLog: try EventLogRecord(),
+                tombstoneDigest: String(repeating: "0", count: 64),
                 integrity: try makeIntegrity()
             )
         ) { error in
@@ -43,17 +47,33 @@ final class ProfileEnvelopePersistenceTests: XCTestCase {
                 storeRevision: DecimalUInt64(rawValue: 2),
                 installationID: UUID(),
                 hasCompletedProfile: true,
+                observedArtifact: try makeArtifactObservation(),
                 globalState: try makeGlobalState(),
                 selectedProfileID: UUID(),
                 languageOverride: .ko,
-                preferenceTransactions: [],
-                tombstoneDigest: String(repeating: "0", count: 64),
                 profiles: [profile],
+                preferenceTransactions: [],
+                eventLog: try EventLogRecord(),
+                tombstoneDigest: String(repeating: "0", count: 64),
                 integrity: try makeIntegrity()
             )
         ) { error in
             XCTAssertEqual(error as? StoreEnvelopeValidationError, .selectedProfileMissing)
         }
+    }
+
+    private func makeArtifactObservation() throws -> ArtifactObservationRecord {
+        try ArtifactObservationRecord(
+            compiledModeObserved: .measurementOnly,
+            buildManifestSHA256: String(repeating: "0", count: 64),
+            codeSignatureStatus: .unsigned,
+            hardenedRuntimeStatus: .unavailable,
+            notarizationStatus: .notApplicable,
+            gatekeeperStatus: .notApplicable,
+            quarantineStatus: .absent,
+            macOSBuild: "24A335",
+            observedAt: Date(timeIntervalSince1970: 10)
+        )
     }
 
     private func makeProfile() throws -> ProfileRecord {

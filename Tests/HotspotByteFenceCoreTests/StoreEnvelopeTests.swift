@@ -17,6 +17,10 @@ final class StoreEnvelopeTests: XCTestCase {
         XCTAssertTrue(json.contains("\"storeRevision\":\"2\""))
         XCTAssertTrue(json.contains("\"globalState\""))
         XCTAssertTrue(json.contains("\"integrity\""))
+        XCTAssertTrue(json.contains("\"observedArtifact\""))
+        XCTAssertTrue(json.contains("\"commandResults\""))
+        XCTAssertTrue(json.contains("\"notificationState\""))
+        XCTAssertTrue(json.contains("\"eventLog\""))
         XCTAssertEqual(envelope.storeRevision, DecimalUInt64(rawValue: 2))
         XCTAssertEqual(envelope.preferenceTransactions, [transaction])
         XCTAssertEqual(envelope.globalState.safetyState, .normal)
@@ -121,6 +125,9 @@ final class StoreEnvelopeTests: XCTestCase {
         selectedProfileID: UUID? = nil,
         languageOverride: StoreLanguageOverrideV1 = .ko,
         preferenceTransactions: [PreferenceTransactionRecord] = [],
+        commandResults: [CommandResultRecord] = [],
+        notificationState: NotificationStateRecord = NotificationStateRecord(),
+        eventLog: EventLogRecord? = nil,
         tombstoneDigest: String = String(repeating: "0", count: 64),
         globalState: GlobalStateRecord? = nil,
         integrity: IntegrityRecord? = nil
@@ -135,6 +142,7 @@ final class StoreEnvelopeTests: XCTestCase {
             previousGoodRevision: previousGoodRevision,
             installationID: installationID,
             hasCompletedProfile: hasCompletedProfile,
+            observedArtifact: try makeArtifactObservation(),
             globalState: try globalState ?? GlobalStateRecord(
                 safetyState: .normal,
                 recoveryReason: nil,
@@ -144,9 +152,12 @@ final class StoreEnvelopeTests: XCTestCase {
             ),
             selectedProfileID: selectedProfileID,
             languageOverride: languageOverride,
-            preferenceTransactions: preferenceTransactions,
-            tombstoneDigest: tombstoneDigest,
             profiles: try profileIDs.map(makeProfile),
+            preferenceTransactions: preferenceTransactions,
+            commandResults: commandResults,
+            notificationState: notificationState,
+            eventLog: try eventLog ?? EventLogRecord(),
+            tombstoneDigest: tombstoneDigest,
             integrity: try integrity ?? IntegrityRecord(
                 canonicalDigest: String(repeating: "a", count: 64),
                 lkgDigest: nil,
@@ -156,6 +167,20 @@ final class StoreEnvelopeTests: XCTestCase {
                 },
                 validatedAt: Date(timeIntervalSince1970: 20)
             )
+        )
+    }
+
+    private func makeArtifactObservation() throws -> ArtifactObservationRecord {
+        try ArtifactObservationRecord(
+            compiledModeObserved: .measurementOnly,
+            buildManifestSHA256: String(repeating: "0", count: 64),
+            codeSignatureStatus: .unsigned,
+            hardenedRuntimeStatus: .unavailable,
+            notarizationStatus: .notApplicable,
+            gatekeeperStatus: .notApplicable,
+            quarantineStatus: .absent,
+            macOSBuild: "24A335",
+            observedAt: Date(timeIntervalSince1970: 10)
         )
     }
 
