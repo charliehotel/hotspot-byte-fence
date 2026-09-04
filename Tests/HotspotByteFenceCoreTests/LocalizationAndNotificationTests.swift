@@ -249,6 +249,7 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(korean.noticeVPNTitle, "• VPN 사용 시 동작")
         XCTAssertEqual(korean.formatPresetResetDay(day: 1), "매월 1일")
         XCTAssertEqual(korean.formatPresetResetDay(day: 31), "매월 말일 (31일)")
+        XCTAssertEqual(korean.promptCustomLimitPlaceholder, "예: 12.5")
 
         let english = Localization(language: .english)
         XCTAssertEqual(english.languageMenuTitle, "Language")
@@ -267,6 +268,7 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(english.noticeVPNTitle, "• Behavior When Using VPN")
         XCTAssertEqual(english.formatPresetResetDay(day: 1), "Day 1")
         XCTAssertEqual(english.formatPresetResetDay(day: 31), "End of month (Day 31)")
+        XCTAssertEqual(english.promptCustomLimitPlaceholder, "e.g. 12.5")
 
         #if canImport(AppKit) && canImport(SwiftUI)
         XCTAssertEqual(SettingsTab.allCases.count, 2)

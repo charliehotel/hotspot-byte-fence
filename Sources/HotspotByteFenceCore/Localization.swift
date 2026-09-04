@@ -256,6 +256,10 @@ public struct Localization: Sendable {
         isKorean ? "원하는 데이터 한도(GB 단위)를 입력하세요:" : "Enter the desired data limit (in GB):"
     }
 
+    public var promptCustomLimitPlaceholder: String {
+        isKorean ? "예: 12.5" : "e.g. 12.5"
+    }
+
     public var confirm: String {
         isKorean ? "확인" : "OK"
     }

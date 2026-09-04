@@ -398,7 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: localization.cancel)
 
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
-        input.placeholderString = "예: 12.5"
+        input.placeholderString = localization.promptCustomLimitPlaceholder
         alert.accessoryView = input
 
         if alert.runModal() == .alertFirstButtonReturn {
