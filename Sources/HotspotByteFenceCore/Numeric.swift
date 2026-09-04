@@ -142,6 +142,10 @@ public enum UsageFormatter {
         let fractionalText = fractional < 10 ? "0\(fractional)" : String(fractional)
         return "\(whole).\(fractionalText)GB"
     }
+
+    public static func formatGB(_ bytes: ByteCount) -> String {
+        (try? format(bytes)) ?? "0.00GB"
+    }
 }
 
 public enum UsageBand: String, Codable, Equatable, Sendable {

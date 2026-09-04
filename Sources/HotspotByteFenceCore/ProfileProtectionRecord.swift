@@ -171,12 +171,34 @@ public struct ProtectionRecord: Codable, Equatable, Sendable {
         self.blockingCapability = blockingCapability
         self.lastAuthorizationOutcome = lastAuthorizationOutcome
         self.retry = retry
-        self.lastSuppressionObservation = lastSuppressionObservation
-        self.lastFailureReason = lastFailureReason
-        self.ownedTransactionID = ownedTransactionID
+       self.lastSuppressionObservation = lastSuppressionObservation
+       self.lastFailureReason = lastFailureReason
+       self.ownedTransactionID = ownedTransactionID
+   }
+
+    public func updating(
+        limitReached: Bool? = nil,
+        pauseBlocking: Bool? = nil,
+        blockingCapability: BlockingCapabilityV1? = nil,
+        lastAuthorizationOutcome: AuthorizationOutcomeV1? = nil,
+        retry: RetryRecord? = nil,
+        lastSuppressionObservation: ObservationSummaryRecord?? = nil,
+        lastFailureReason: ProtectionFailureReasonV1?? = nil,
+        ownedTransactionID: UUID?? = nil
+    ) throws -> ProtectionRecord {
+        try ProtectionRecord(
+            limitReached: limitReached ?? self.limitReached,
+            pauseBlocking: pauseBlocking ?? self.pauseBlocking,
+            blockingCapability: blockingCapability ?? self.blockingCapability,
+            lastAuthorizationOutcome: lastAuthorizationOutcome ?? self.lastAuthorizationOutcome,
+            retry: retry ?? self.retry,
+            lastSuppressionObservation: lastSuppressionObservation != nil ? lastSuppressionObservation! : self.lastSuppressionObservation,
+            lastFailureReason: lastFailureReason != nil ? lastFailureReason! : self.lastFailureReason,
+            ownedTransactionID: ownedTransactionID != nil ? ownedTransactionID! : self.ownedTransactionID
+        )
     }
 
-    public init(from decoder: Decoder) throws {
+   public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         guard container.contains(.lastSuppressionObservation),
               container.contains(.lastFailureReason),

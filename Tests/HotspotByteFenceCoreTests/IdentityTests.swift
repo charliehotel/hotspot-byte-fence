@@ -111,4 +111,115 @@ final class IdentityTests: XCTestCase {
             bssid: try BSSID(string: bssid)
         )
     }
+
+    func testFXIdentity001FixtureValidation() throws {
+        let fixture = try loadFixture()
+        XCTAssertEqual(fixture.schemaVersion, 1)
+
+        for item in fixture.validSSIDs {
+            let ssid = try SSID(hex: item.hex)
+            XCTAssertEqual(ssid.hex, item.hex.lowercased())
+            XCTAssertEqual(ssid.bytes.count, item.byteCount)
+            if let expectedUTF8 = item.utf8 {
+                XCTAssertEqual(String(bytes: ssid.bytes, encoding: .utf8), expectedUTF8)
+            }
+        }
+
+        for item in fixture.invalidSSIDs {
+            XCTAssertThrowsError(try SSID(hex: item.hex), "Expected failure for \(item.name)")
+        }
+
+        for item in fixture.validBSSIDs {
+            let bssid = try BSSID(string: item.input)
+            XCTAssertEqual(bssid.description, item.normalized.lowercased())
+        }
+
+        for item in fixture.invalidBSSIDs {
+            XCTAssertThrowsError(try BSSID(string: item.input), "Expected failure for \(item.reason)")
+        }
+
+        let baseProfile = try profile(
+            alias: "Target Hotspot",
+            ssid: "486f7473706f74",
+            bssid: "aa:bb:cc:dd:ee:01",
+            interfaceName: "en0"
+        )
+
+        for testCase in fixture.resolutionCases {
+            let snapshots: [WiFiIdentitySnapshot] = try testCase.snapshots.map { snap in
+                let linkState: WiFiLinkState = snap.linkState == "associated" ? .associated : .notAssociated
+                return WiFiIdentitySnapshot(
+                    interfaceName: snap.interfaceName,
+                    interfaceIndex: snap.interfaceIndex,
+                    linkState: linkState,
+                    ssid: try SSID(hex: snap.ssidHex),
+                    bssid: try BSSID(string: snap.bssid)
+                )
+            }
+            let result = ProfileResolver.resolve(profiles: [baseProfile], snapshots: snapshots)
+            switch testCase.expectedResolution {
+            case "connected":
+                XCTAssertEqual(result, .connected(baseProfile.id), "Case: \(testCase.caseID)")
+            case "needsBSSIDConfirmation":
+                XCTAssertEqual(result, .needsBSSIDConfirmation([baseProfile.id]), "Case: \(testCase.caseID)")
+            case "unknownNetwork":
+                XCTAssertEqual(result, .unknownNetwork, "Case: \(testCase.caseID)")
+            case "disconnected":
+                XCTAssertEqual(result, .disconnected, "Case: \(testCase.caseID)")
+            default:
+                XCTFail("Unknown expected resolution: \(testCase.expectedResolution)")
+            }
+        }
+    }
+
+    private func loadFixture() throws -> IdentityFixture {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "FX-Identity-001",
+            withExtension: "json",
+            subdirectory: "Fixtures/HotspotByteFence"
+        ))
+        return try JSONDecoder().decode(IdentityFixture.self, from: Data(contentsOf: url))
+    }
+}
+
+private struct IdentityFixture: Decodable {
+    struct ValidSSID: Decodable {
+        let name: String
+        let hex: String
+        let utf8: String?
+        let byteCount: Int
+    }
+    struct InvalidSSID: Decodable {
+        let name: String
+        let hex: String
+        let reason: String
+    }
+    struct ValidBSSID: Decodable {
+        let input: String
+        let normalized: String
+    }
+    struct InvalidBSSID: Decodable {
+        let input: String
+        let reason: String
+    }
+    struct SnapshotItem: Decodable {
+        let bssid: String
+        let interfaceIndex: UInt32
+        let interfaceName: String
+        let linkState: String
+        let ssidHex: String
+    }
+    struct ResolutionCase: Decodable {
+        let caseID: String
+        let description: String
+        let expectedResolution: String
+        let snapshots: [SnapshotItem]
+    }
+
+    let schemaVersion: Int
+    let validSSIDs: [ValidSSID]
+    let invalidSSIDs: [InvalidSSID]
+    let validBSSIDs: [ValidBSSID]
+    let invalidBSSIDs: [InvalidBSSID]
+    let resolutionCases: [ResolutionCase]
 }

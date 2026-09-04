@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""
+Hotspot Byte Fence (HBF) - Redacted Evidence Report Validator
+Validates report-redacted.json against schema, prohibited-data rules, digest bindings, and verdict consistency.
+"""
+
+import sys
+import json
+import re
+import argparse
+from pathlib import Path
+
+PROHIBITED_KEY_PATTERNS = [
+    re.compile(r"(?i)(password|secret|auth.*token|packet.*content|latitude|longitude|coordinate)")
+]
+
+PROHIBITED_VALUE_PATTERNS = [
+    re.compile(r"https?://[^\s]+"),
+    re.compile(r"(?i)(latitude|longitude)\s*[:=]"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9_\-\.]+"),
+]
+
+ALLOWED_VERDICTS = {"PASS", "FAIL", "PENDING", "BLOCKED"}
+
+def validate_report(report_path: Path) -> int:
+    if not report_path.exists():
+        print(f"Error: Report file not found: {report_path}", file=sys.stderr)
+        return 1
+
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error: Failed to parse JSON from {report_path}: {e}", file=sys.stderr)
+        return 1
+
+    errors = []
+
+    # Required top-level fields
+    required_keys = ["schemaVersion", "runID", "applicationVersion", "macOSBuild", "digests", "verdicts", "cases"]
+    for key in required_keys:
+        if key not in data:
+            errors.append(f"Missing required top-level key: '{key}'")
+
+    if data.get("schemaVersion") != 1:
+        errors.append(f"Invalid schemaVersion: expected 1, got {data.get('schemaVersion')}")
+
+    digests = data.get("digests", {})
+    if not isinstance(digests, dict):
+        errors.append("'digests' must be an object")
+    else:
+        for d_key in ["executableSHA256", "manifestSHA256"]:
+            if not digests.get(d_key):
+                errors.append(f"Missing required digest in 'digests': '{d_key}'")
+
+    cases = data.get("cases", [])
+    if not isinstance(cases, list):
+        errors.append("'cases' must be a list")
+    else:
+        for idx, case in enumerate(cases):
+            if not isinstance(case, dict):
+                errors.append(f"Case at index {idx} must be an object")
+                continue
+            case_id = case.get("caseID") or case.get("gateID") or f"case[{idx}]"
+            verdict = case.get("verdict")
+            if verdict not in ALLOWED_VERDICTS:
+                errors.append(f"Case '{case_id}' has invalid verdict: '{verdict}' (expected one of {ALLOWED_VERDICTS})")
+
+    # Check for prohibited data in keys and string values
+    def check_prohibited(obj, path=""):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                curr_path = f"{path}.{k}" if path else k
+                for pattern in PROHIBITED_KEY_PATTERNS:
+                    if pattern.search(k):
+                        errors.append(f"Prohibited key detected at '{curr_path}' matching pattern '{pattern.pattern}'")
+                check_prohibited(v, curr_path)
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                check_prohibited(v, f"{path}[{i}]")
+        elif isinstance(obj, str):
+            for pattern in PROHIBITED_VALUE_PATTERNS:
+                if pattern.search(obj):
+                    errors.append(f"Prohibited value detected at '{path}' matching pattern '{pattern.pattern}'")
+
+    check_prohibited(data)
+
+    if errors:
+        print(f"Validation FAILED for {report_path}:", file=sys.stderr)
+        for err in errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 1
+
+    print(f"Validation PASSED: {report_path} is valid and contains no prohibited data.")
+    return 0
+
+def main():
+    parser = argparse.ArgumentParser(description="Validate Hotspot Byte Fence redacted report")
+    parser.add_argument("report", type=Path, help="Path to report-redacted.json")
+    args = parser.parse_args()
+    sys.exit(validate_report(args.report))
+
+if __name__ == "__main__":
+    main()

@@ -15,7 +15,7 @@ public enum WiFiIdentityAdapterError: Error, Equatable, Sendable {
     case inconsistentReads
 }
 
-public final class CoreWLANIdentityAdapter {
+public final class CoreWLANIdentityAdapter: @unchecked Sendable, WiFiIdentitySource {
     private let client: CWWiFiClient
 
     public init(client: CWWiFiClient = CWWiFiClient.shared()) {

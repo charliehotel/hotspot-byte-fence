@@ -32,7 +32,7 @@ public enum DarwinCounterSourceError: Error, Equatable, Sendable {
     case invalidBufferLength
 }
 
-public struct DarwinInterfaceCounterSource: Sendable {
+public struct DarwinInterfaceCounterSource: InterfaceCounterSource {
     public init() {}
 
     public func read(interfaceName: String) throws -> InterfaceCounters {

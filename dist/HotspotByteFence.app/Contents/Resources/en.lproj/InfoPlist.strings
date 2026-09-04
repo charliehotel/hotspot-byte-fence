@@ -1,0 +1,3 @@
+/* English */
+CFBundleDisplayName = "Hotspot Byte Fence";
+NSLocationUsageDescription = "Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.";

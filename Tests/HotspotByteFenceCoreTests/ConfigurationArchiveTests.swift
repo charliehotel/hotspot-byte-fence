@@ -110,4 +110,136 @@ final class ConfigurationArchiveTests: XCTestCase {
         XCTAssertEqual(replayed.flags, archive.flags)
         XCTAssertEqual(archive.removingProfiles(matching: try SSID(hex: "ffff")), archive)
     }
+
+    func testFXConfigurationArchive001FixtureValidation() throws {
+        let fixture = try loadFixture()
+        XCTAssertEqual(fixture.schemaVersion, 1)
+
+        for valid in fixture.validArchives {
+            let profiles = try valid.profiles.map { profile in
+                try CWNetworkProfileArchiveV1(
+                    ssidHex: profile.ssidHex,
+                    securityRawValue: DecimalUInt64(rawValue: profile.securityRawValue)
+                )
+            }
+            let archive = CWConfigurationArchiveV1(
+                networkProfiles: profiles,
+                flags: valid.flags
+            )
+            let canonicalData = try archive.canonicalData()
+            XCTAssertEqual(String(decoding: canonicalData, as: UTF8.self), valid.expectedCanonicalJSON)
+            let roundTrip = try CWConfigurationArchiveV1(canonicalData: canonicalData)
+            XCTAssertEqual(roundTrip, archive)
+        }
+
+        for invalid in fixture.invalidProfileCases {
+            XCTAssertThrowsError(try CWNetworkProfileArchiveV1(
+                ssidHex: invalid.ssidHex,
+                securityRawValue: DecimalUInt64(rawValue: invalid.securityRawValue)
+            ))
+        }
+
+        for replay in fixture.replayCases {
+            let initialProfiles = try replay.initialProfiles.map { profile in
+                try CWNetworkProfileArchiveV1(
+                    ssidHex: profile.ssidHex,
+                    securityRawValue: DecimalUInt64(rawValue: profile.securityRawValue)
+                )
+            }
+            let archive = CWConfigurationArchiveV1(
+                networkProfiles: initialProfiles,
+                flags: CWConfigurationArchiveFlagsV1(
+                    requireAdministratorForAssociation: false,
+                    requireAdministratorForIBSSMode: false,
+                    requireAdministratorForPower: false,
+                    rememberJoinedNetworks: true
+                )
+            )
+            let result = archive.removingProfiles(matching: try SSID(hex: replay.removeSSIDHex))
+            XCTAssertEqual(result.networkProfiles.map { $0.ssidHex }, replay.expectedRemainingProfiles.map { $0.ssidHex })
+        }
+    }
+
+    private func loadFixture() throws -> ConfigurationArchiveFixture {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "FX-ConfigurationArchive-001",
+            withExtension: "json",
+            subdirectory: "Fixtures/HotspotByteFence"
+        ))
+        return try JSONDecoder().decode(ConfigurationArchiveFixture.self, from: Data(contentsOf: url))
+    }
+}
+
+private struct ConfigurationArchiveFixture: Decodable {
+    struct ValidArchive: Decodable {
+        let caseID: String
+        let description: String
+        let flags: CWConfigurationArchiveFlagsV1
+        let profiles: [ProfileItem]
+        let expectedCanonicalJSON: String
+    }
+    struct ProfileItem: Decodable {
+        let securityRawValue: UInt64
+        let ssidHex: String
+
+        enum CodingKeys: String, CodingKey {
+            case securityRawValue
+            case ssidHex
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let rawValueString = try container.decode(String.self, forKey: .securityRawValue)
+            guard let rawValue = UInt64(rawValueString) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .securityRawValue,
+                    in: container,
+                    debugDescription: "Invalid securityRawValue"
+                )
+            }
+            self.securityRawValue = rawValue
+            self.ssidHex = try container.decode(String.self, forKey: .ssidHex)
+        }
+    }
+    struct InvalidProfileCase: Decodable {
+        let description: String
+        let securityRawValue: UInt64
+        let ssidHex: String
+        let expectedError: String
+
+        enum CodingKeys: String, CodingKey {
+            case description
+            case securityRawValue
+            case ssidHex
+            case expectedError
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.description = try container.decode(String.self, forKey: .description)
+            let rawValueString = try container.decode(String.self, forKey: .securityRawValue)
+            guard let rawValue = UInt64(rawValueString) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .securityRawValue,
+                    in: container,
+                    debugDescription: "Invalid securityRawValue"
+                )
+            }
+            self.securityRawValue = rawValue
+            self.ssidHex = try container.decode(String.self, forKey: .ssidHex)
+            self.expectedError = try container.decode(String.self, forKey: .expectedError)
+        }
+    }
+    struct ReplayCase: Decodable {
+        let caseID: String
+        let description: String
+        let removeSSIDHex: String
+        let initialProfiles: [ProfileItem]
+        let expectedRemainingProfiles: [ProfileItem]
+    }
+
+    let schemaVersion: Int
+    let validArchives: [ValidArchive]
+    let invalidProfileCases: [InvalidProfileCase]
+    let replayCases: [ReplayCase]
 }

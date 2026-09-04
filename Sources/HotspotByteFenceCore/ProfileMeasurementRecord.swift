@@ -35,11 +35,27 @@ public struct MeasurementRecord: Codable, Equatable, Sendable {
         self.lastRXBytes = lastRXBytes
         self.lastTXBytes = lastTXBytes
         self.lastSampleWallClock = lastSampleWallClock
-        self.lastPersistedUsageAt = lastPersistedUsageAt
-        self.bytesSinceLastFlush = bytesSinceLastFlush
+       self.lastPersistedUsageAt = lastPersistedUsageAt
+       self.bytesSinceLastFlush = bytesSinceLastFlush
+   }
+
+    public static func initial(
+        usageBytes: ByteCount = ByteCount(0),
+        persistedAt: Date = Date()
+    ) throws -> MeasurementRecord {
+        try MeasurementRecord(
+            usageBytes: usageBytes,
+            baselinePending: true,
+            lastTrustedIdentity: nil,
+            lastRXBytes: nil,
+            lastTXBytes: nil,
+            lastSampleWallClock: nil,
+            lastPersistedUsageAt: persistedAt,
+            bytesSinceLastFlush: ByteCount(0)
+        )
     }
 
-    public init(from decoder: Decoder) throws {
+   public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         guard container.contains(.lastTrustedIdentity),
               container.contains(.lastRXBytes),

@@ -114,7 +114,30 @@ final class PersistenceTests: XCTestCase {
             ofItemAtPath: store.paths.canonicalURL.path
         )
 
-        XCTAssertEqual(try store.load(), .recoveryRequired(.permissionModeFailure))
+       XCTAssertEqual(try store.load(), .recoveryRequired(.permissionModeFailure))
+   }
+
+    func testFXPersistence001FixtureValidation() throws {
+        let fixture = try loadFixture()
+        XCTAssertEqual(fixture.schemaVersion, 1)
+
+        for transition in fixture.journalPhaseTransitions {
+            guard let from = JournalPhase(rawValue: transition.fromPhase),
+                  let to = JournalPhase(rawValue: transition.toPhase) else {
+                XCTFail("Invalid phase: \(transition.fromPhase) -> \(transition.toPhase)")
+                continue
+            }
+            XCTAssertEqual(from.canAdvance(to: to), transition.expectedValid)
+        }
+    }
+
+    private func loadFixture() throws -> PersistenceFixture {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "FX-Persistence-001",
+            withExtension: "json",
+            subdirectory: "Fixtures/HotspotByteFence"
+        ))
+        return try JSONDecoder().decode(PersistenceFixture.self, from: Data(contentsOf: url))
     }
 
     private func temporaryDirectory() throws -> URL {
@@ -133,4 +156,14 @@ final class PersistenceTests: XCTestCase {
 private struct TestDocument: VersionedDocument {
     let storeRevision: DecimalUInt64
     let value: String
+}
+
+private struct PersistenceFixture: Decodable {
+    struct PhaseTransition: Decodable {
+        let fromPhase: String
+        let toPhase: String
+        let expectedValid: Bool
+    }
+    let schemaVersion: Int
+    let journalPhaseTransitions: [PhaseTransition]
 }

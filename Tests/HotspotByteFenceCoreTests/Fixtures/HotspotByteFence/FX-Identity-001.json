@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "validSSIDs": [
+    {
+      "name": "ascii_standard",
+      "hex": "486f7473706f74",
+      "utf8": "Hotspot",
+      "byteCount": 7
+    },
+    {
+      "name": "single_byte",
+      "hex": "58",
+      "utf8": "X",
+      "byteCount": 1
+    },
+    {
+      "name": "max_32_bytes",
+      "hex": "3132333435363738393031323334353637383930313233343536373839303132",
+      "utf8": "12345678901234567890123456789012",
+      "byteCount": 32
+    },
+    {
+      "name": "raw_binary_non_utf8",
+      "hex": "fffe0011223344",
+      "utf8": null,
+      "byteCount": 7
+    }
+  ],
+  "invalidSSIDs": [
+    {
+      "name": "empty",
+      "hex": "",
+      "reason": "zero_length"
+    },
+    {
+      "name": "odd_hex_length",
+      "hex": "486f7",
+      "reason": "invalid_hex"
+    },
+    {
+      "name": "exceeds_32_bytes",
+      "hex": "313233343536373839303132333435363738393031323334353637383930313233",
+      "reason": "exceeds_32_bytes"
+    },
+    {
+      "name": "invalid_characters",
+      "hex": "486f7473706f7z",
+      "reason": "invalid_hex"
+    }
+  ],
+  "validBSSIDs": [
+    {
+      "input": "00:11:22:33:44:55",
+      "normalized": "00:11:22:33:44:55"
+    },
+    {
+      "input": "AA:BB:CC:DD:EE:FF",
+      "normalized": "aa:bb:cc:dd:ee:ff"
+    },
+    {
+      "input": "aA:bB:cC:dD:eE:fF",
+      "normalized": "aa:bb:cc:dd:ee:ff"
+    }
+  ],
+  "invalidBSSIDs": [
+    {
+      "input": "00:11:22:33:44",
+      "reason": "insufficient_octets"
+    },
+    {
+      "input": "00:11:22:33:44:55:66",
+      "reason": "excess_octets"
+    },
+    {
+      "input": "00:11:22:33:44:GG",
+      "reason": "non_hex_character"
+    },
+    {
+      "input": "00-11-22-33-44-55",
+      "reason": "hyphen_separator_unsupported"
+    }
+  ],
+  "resolutionCases": [
+    {
+      "caseID": "ID-CASE-01",
+      "description": "Exact single profile match",
+      "expectedResolution": "connected",
+      "snapshots": [
+        {
+          "bssid": "aa:bb:cc:dd:ee:01",
+          "interfaceIndex": 4,
+          "interfaceName": "en0",
+          "linkState": "associated",
+          "ssidHex": "486f7473706f74"
+        }
+      ]
+    },
+    {
+      "caseID": "ID-CASE-02",
+      "description": "Known SSID but new unconfirmed BSSID",
+      "expectedResolution": "needsBSSIDConfirmation",
+      "snapshots": [
+        {
+          "bssid": "aa:bb:cc:dd:ee:99",
+          "interfaceIndex": 4,
+          "interfaceName": "en0",
+          "linkState": "associated",
+          "ssidHex": "486f7473706f74"
+        }
+      ]
+    },
+    {
+      "caseID": "ID-CASE-03",
+      "description": "Unregistered network",
+      "expectedResolution": "unknownNetwork",
+      "snapshots": [
+        {
+          "bssid": "ff:ee:dd:cc:bb:aa",
+          "interfaceIndex": 4,
+          "interfaceName": "en0",
+          "linkState": "associated",
+          "ssidHex": "998877"
+        }
+      ]
+    },
+    {
+      "caseID": "ID-CASE-04",
+      "description": "Interface disconnected",
+      "expectedResolution": "disconnected",
+      "snapshots": [
+        {
+          "bssid": "00:00:00:00:00:00",
+          "interfaceIndex": 4,
+          "interfaceName": "en0",
+          "linkState": "notAssociated",
+          "ssidHex": "486f7473706f74"
+        }
+      ]
+    }
+  ]
+}

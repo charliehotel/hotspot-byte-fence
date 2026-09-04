@@ -1,6 +1,6 @@
 import Foundation
 
-public final class JournaledStateStore<Document: VersionedDocument> {
+public final class JournaledStateStore<Document: VersionedDocument>: @unchecked Sendable {
     public let paths: StorePaths
     public let installationID: UUID
 

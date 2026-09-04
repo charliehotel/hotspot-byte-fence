@@ -46,3 +46,5 @@ public extension JournaledStateStore where Document == StoreEnvelopeV1 {
         return result
     }
 }
+
+extension JournaledStateStore: EnvelopeStoreProtocol where Document == StoreEnvelopeV1 {}

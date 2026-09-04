@@ -27,6 +27,17 @@ final class StoreEnvelopeTests: XCTestCase {
         XCTAssertEqual(envelope.integrity.lastValidatedRevision, envelope.storeRevision)
     }
 
+    func testStoreEnvelopeMakeInitial() throws {
+        let installationID = UUID()
+        let initial = try StoreEnvelopeV1.makeInitial(installationID: installationID)
+        XCTAssertEqual(initial.installationID, installationID)
+        XCTAssertEqual(initial.storeRevision, DecimalUInt64(rawValue: 1))
+        XCTAssertNil(initial.previousGoodRevision)
+        XCTAssertFalse(initial.hasCompletedProfile)
+        XCTAssertTrue(initial.profiles.isEmpty)
+        XCTAssertNoThrow(try initial.validateSelfBinding())
+    }
+
     func testEnvelopeRejectsInvalidRevisionDigestAndDuplicateTransaction() throws {
         let transaction = try makeTransaction()
         let futureSchema = String(

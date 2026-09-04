@@ -89,11 +89,38 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         self.cycle = cycle
         self.measurement = measurement
         self.protection = protection
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
+       self.createdAt = createdAt
+       self.updatedAt = updatedAt
+   }
+
+    public func updating(
+        limitBytes: ByteCount? = nil,
+        resetDay: UInt? = nil,
+        confirmedBSSIDs: [BSSID]? = nil,
+        cycle: CycleRecord? = nil,
+        measurement: MeasurementRecord? = nil,
+        protection: ProtectionRecord? = nil,
+        updatedAt: Date = Date()
+    ) throws -> ProfileRecord {
+        try ProfileRecord(
+            profileID: self.profileID,
+            aliasNFC: self.aliasNFC,
+            ssidHex: self.ssidHex,
+            interfaceName: self.interfaceName,
+            confirmedBSSIDs: confirmedBSSIDs ?? self.confirmedBSSIDs,
+            isComplete: self.isComplete,
+            sharesInterfaceSSID: self.sharesInterfaceSSID,
+            limitBytes: limitBytes ?? self.limitBytes,
+            resetDay: resetDay ?? self.resetDay,
+            cycle: cycle ?? self.cycle,
+            measurement: measurement ?? self.measurement,
+            protection: protection ?? self.protection,
+            createdAt: self.createdAt,
+            updatedAt: updatedAt
+        )
     }
 
-    public init(from decoder: Decoder) throws {
+   public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         guard container.contains(.ssidHex), container.contains(.interfaceName) else {
             throw ProfileRecordValidationError.invalidIdentity

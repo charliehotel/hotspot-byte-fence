@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "canonicalAndLKGRecoveryCases": [
+    {
+      "caseID": "PERSIST-RECOVERY-01",
+      "description": "Corrupted canonical state with valid LKG allows explicit recovery",
+      "canonicalCorrupted": true,
+      "lkgValid": true,
+      "expectedRecoveryStatus": "recoveryRequired",
+      "expectedReason": "canonicalDecodeFailure"
+    },
+    {
+      "caseID": "PERSIST-RECOVERY-02",
+      "description": "Incomplete prepared journal blocks normal load but permits LKG recovery",
+      "journalPhase": "prepared",
+      "expectedRecoveryStatus": "recoveryRequired",
+      "expectedReason": "incompleteJournal"
+    },
+    {
+      "caseID": "PERSIST-RECOVERY-03",
+      "description": "Journal digest mismatch enters integrity failure",
+      "digestMismatched": true,
+      "expectedRecoveryStatus": "recoveryRequired",
+      "expectedReason": "integrityFailure"
+    },
+    {
+      "caseID": "PERSIST-RECOVERY-04",
+      "description": "Non-owner file permissions require permission mode failure recovery",
+      "posixPermissions": "0o644",
+      "expectedRecoveryStatus": "recoveryRequired",
+      "expectedReason": "permissionModeFailure"
+    }
+  ],
+  "journalPhaseTransitions": [
+    {
+      "fromPhase": "prepared",
+      "toPhase": "canonicalCommitted",
+      "expectedValid": true
+    },
+    {
+      "fromPhase": "prepared",
+      "toPhase": "lkgCommitted",
+      "expectedValid": false
+    },
+    {
+      "fromPhase": "canonicalCommitted",
+      "toPhase": "lkgCommitted",
+      "expectedValid": true
+    },
+    {
+      "fromPhase": "lkgCommitted",
+      "toPhase": "complete",
+      "expectedValid": true
+    },
+    {
+      "fromPhase": "prepared",
+      "toPhase": "purgeInProgress",
+      "expectedValid": true
+    },
+    {
+      "fromPhase": "purgeInProgress",
+      "toPhase": "complete",
+      "expectedValid": true
+    }
+  ],
+  "cutPointCases": [
+    {
+      "cutPointID": "CUT-POINT-01",
+      "operation": "firstCompletedProfile",
+      "interruptedPhase": "canonicalCommitted",
+      "expectedRecoveryAction": "recoverFromLKG"
+    },
+    {
+      "cutPointID": "CUT-POINT-02",
+      "operation": "measurementSample",
+      "interruptedPhase": "prepared",
+      "expectedRecoveryAction": "recoverFromLKG"
+    },
+    {
+      "cutPointID": "CUT-POINT-03",
+      "operation": "profileDeletion",
+      "interruptedPhase": "purgeInProgress",
+      "expectedRecoveryAction": "resumePurge"
+    }
+  ]
+}

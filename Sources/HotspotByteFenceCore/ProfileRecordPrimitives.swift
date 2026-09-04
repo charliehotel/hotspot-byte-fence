@@ -75,12 +75,53 @@ public struct CycleRecord: Codable, Equatable, Sendable {
         )
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case trustedCycleDate
-        case cycleStartInstant
-        case timeZoneID
-        case lastTrustedWallClock
-        case timeAcknowledgementRequired
+   private enum CodingKeys: String, CodingKey {
+       case trustedCycleDate
+       case cycleStartInstant
+       case timeZoneID
+       case lastTrustedWallClock
+       case timeAcknowledgementRequired
+   }
+
+    public init(
+        cycleID: CycleID,
+        wallClock: Date = Date(),
+        timeAcknowledgementRequired: Bool = false
+    ) throws {
+        guard let tz = TimeZone(identifier: cycleID.timeZoneID) else {
+            throw ProfileRecordValidationError.invalidCycle
+        }
+        let parts = cycleID.effectiveDate.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else {
+            throw ProfileRecordValidationError.invalidCycle
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tz
+        let startComponents = DateComponents(
+            calendar: calendar,
+            timeZone: tz,
+            year: parts[0],
+            month: parts[1],
+            day: parts[2],
+            hour: 0,
+            minute: 0,
+            second: 0
+        )
+        guard let startInstant = calendar.date(from: startComponents) else {
+            throw ProfileRecordValidationError.invalidCycle
+        }
+        let lastWallClock = max(startInstant, wallClock)
+        try self.init(
+            trustedCycleDate: cycleID.effectiveDate,
+            cycleStartInstant: startInstant,
+            timeZoneID: cycleID.timeZoneID,
+            lastTrustedWallClock: lastWallClock,
+            timeAcknowledgementRequired: timeAcknowledgementRequired
+        )
+    }
+
+   public var cycleID: CycleID {
+        CycleID(effectiveDate: trustedCycleDate, timeZoneID: timeZoneID)
     }
 }
 
@@ -111,15 +152,26 @@ public struct IdentitySnapshotRecord: Codable, Equatable, Sendable {
               parsedBSSID.description == bssid else {
             throw ProfileRecordValidationError.invalidIdentity
         }
-        self.profileID = profileID
-        self.interfaceName = interfaceName
-        self.interfaceIndex = interfaceIndex
-        self.linkState = linkState
-        self.ssidHex = ssidHex
-        self.bssid = bssid
+       self.profileID = profileID
+       self.interfaceName = interfaceName
+       self.interfaceIndex = interfaceIndex
+       self.linkState = linkState
+       self.ssidHex = ssidHex
+       self.bssid = bssid
+   }
+
+    public init(profileID: UUID, snapshot: WiFiIdentitySnapshot) throws {
+        try self.init(
+            profileID: profileID,
+            interfaceName: snapshot.interfaceName,
+            interfaceIndex: snapshot.interfaceIndex,
+            linkState: snapshot.linkState,
+            ssidHex: snapshot.ssid.hex,
+            bssid: snapshot.bssid.description
+        )
     }
 
-    public init(from decoder: Decoder) throws {
+   public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(
             profileID: container.decode(UUID.self, forKey: .profileID),

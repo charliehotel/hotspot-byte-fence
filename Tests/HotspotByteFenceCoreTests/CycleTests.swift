@@ -25,4 +25,61 @@ final class CycleTests: XCTestCase {
         XCTAssertThrowsError(try CycleCalculator.effectiveResetDay(year: 2026, month: 1, resetDay: 0))
         XCTAssertThrowsError(try CycleCalculator.effectiveResetDay(year: 2026, month: 1, resetDay: 32))
     }
+
+    func testFXClock001FixtureValidation() throws {
+        let fixture = try loadFixture()
+        XCTAssertEqual(fixture.schemaVersion, 1)
+
+        for item in fixture.fallbackCases {
+            let effective = try CycleCalculator.effectiveResetDay(
+                year: item.year,
+                month: item.month,
+                resetDay: item.configuredResetDay
+            )
+            XCTAssertEqual(effective, item.expectedEffectiveDay)
+        }
+
+        let formatter = ISO8601DateFormatter()
+        for item in fixture.boundaryCases {
+            let timeZone = try XCTUnwrap(TimeZone(identifier: item.timeZoneID))
+            let now = try XCTUnwrap(formatter.date(from: item.nowISO8601))
+            let boundary = try CycleCalculator.boundary(for: now, resetDay: item.resetDay, timeZone: timeZone)
+            XCTAssertEqual(boundary.effectiveDate, item.expectedEffectiveDate, "Case: \(item.caseID)")
+            XCTAssertEqual(boundary.timeZoneID, item.timeZoneID, "Case: \(item.caseID)")
+        }
+
+        for invalidDay in fixture.invalidResetDays {
+            XCTAssertThrowsError(try CycleCalculator.effectiveResetDay(year: 2026, month: 1, resetDay: invalidDay))
+        }
+    }
+
+    private func loadFixture() throws -> ClockFixture {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "FX-Clock-001",
+            withExtension: "json",
+            subdirectory: "Fixtures/HotspotByteFence"
+        ))
+        return try JSONDecoder().decode(ClockFixture.self, from: Data(contentsOf: url))
+    }
+}
+
+private struct ClockFixture: Decodable {
+    struct FallbackCase: Decodable {
+        let year: Int
+        let month: Int
+        let configuredResetDay: Int
+        let expectedEffectiveDay: Int
+    }
+    struct BoundaryCase: Decodable {
+        let caseID: String
+        let timeZoneID: String
+        let nowISO8601: String
+        let resetDay: Int
+        let expectedEffectiveDate: String
+    }
+
+    let schemaVersion: Int
+    let fallbackCases: [FallbackCase]
+    let boundaryCases: [BoundaryCase]
+    let invalidResetDays: [Int]
 }

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "fallbackCases": [
+    {
+      "year": 2026,
+      "month": 4,
+      "configuredResetDay": 31,
+      "expectedEffectiveDay": 30
+    },
+    {
+      "year": 2026,
+      "month": 2,
+      "configuredResetDay": 30,
+      "expectedEffectiveDay": 28
+    },
+    {
+      "year": 2028,
+      "month": 2,
+      "configuredResetDay": 31,
+      "expectedEffectiveDay": 29
+    },
+    {
+      "year": 2026,
+      "month": 5,
+      "configuredResetDay": 31,
+      "expectedEffectiveDay": 31
+    },
+    {
+      "year": 2026,
+      "month": 1,
+      "configuredResetDay": 15,
+      "expectedEffectiveDay": 15
+    }
+  ],
+  "boundaryCases": [
+    {
+      "caseID": "CLOCK-CASE-01",
+      "timeZoneID": "Asia/Seoul",
+      "nowISO8601": "2026-05-01T12:00:00+09:00",
+      "resetDay": 31,
+      "expectedEffectiveDate": "2026-04-30"
+    },
+    {
+      "caseID": "CLOCK-CASE-02",
+      "timeZoneID": "Asia/Seoul",
+      "nowISO8601": "2026-05-31T01:00:00+09:00",
+      "resetDay": 31,
+      "expectedEffectiveDate": "2026-05-31"
+    },
+    {
+      "caseID": "CLOCK-CASE-03",
+      "timeZoneID": "America/New_York",
+      "nowISO8601": "2026-03-10T15:00:00-04:00",
+      "resetDay": 1,
+      "expectedEffectiveDate": "2026-03-01"
+    },
+    {
+      "caseID": "CLOCK-CASE-04",
+      "timeZoneID": "GMT",
+      "nowISO8601": "2026-01-01T00:00:00Z",
+      "resetDay": 15,
+      "expectedEffectiveDate": "2025-12-15"
+    }
+  ],
+  "invalidResetDays": [0, 32, -1]
+}

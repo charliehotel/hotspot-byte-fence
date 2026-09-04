@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "validArchives": [
+    {
+      "caseID": "ARCHIVE-VALID-01",
+      "description": "Standard two-profile configuration with admin association flag",
+      "flags": {
+        "rememberJoinedNetworks": false,
+        "requireAdministratorForAssociation": true,
+        "requireAdministratorForIBSSMode": false,
+        "requireAdministratorForPower": true
+      },
+      "profiles": [
+        {
+          "securityRawValue": "3",
+          "ssidHex": "0102"
+        },
+        {
+          "securityRawValue": "7",
+          "ssidHex": "aabbcc"
+        }
+      ],
+      "expectedCanonicalJSON": "{\"networkProfiles\":[{\"securityRawValue\":\"3\",\"ssidHex\":\"0102\"},{\"securityRawValue\":\"7\",\"ssidHex\":\"aabbcc\"}],\"rememberJoinedNetworks\":false,\"requireAdministratorForAssociation\":true,\"requireAdministratorForIBSSMode\":false,\"requireAdministratorForPower\":true,\"schemaVersion\":1}"
+    },
+    {
+      "caseID": "ARCHIVE-VALID-02",
+      "description": "Empty profile configuration with rememberJoinedNetworks flag",
+      "flags": {
+        "rememberJoinedNetworks": true,
+        "requireAdministratorForAssociation": false,
+        "requireAdministratorForIBSSMode": false,
+        "requireAdministratorForPower": false
+      },
+      "profiles": [],
+      "expectedCanonicalJSON": "{\"networkProfiles\":[],\"rememberJoinedNetworks\":true,\"requireAdministratorForAssociation\":false,\"requireAdministratorForIBSSMode\":false,\"requireAdministratorForPower\":false,\"schemaVersion\":1}"
+    }
+  ],
+  "invalidProfileCases": [
+    {
+      "description": "Uppercase SSID hex is rejected",
+      "securityRawValue": "3",
+      "ssidHex": "AABB",
+      "expectedError": "invalidSSID"
+    },
+    {
+      "description": "Security raw value > 15 is rejected",
+      "securityRawValue": "16",
+      "ssidHex": "aabb",
+      "expectedError": "unsupportedSecurityValue"
+    }
+  ],
+  "replayCases": [
+    {
+      "caseID": "REPLAY-01",
+      "description": "Removes duplicate target SSID profiles while preserving order of unrelated profiles",
+      "removeSSIDHex": "0102",
+      "initialProfiles": [
+        {
+          "securityRawValue": "1",
+          "ssidHex": "0102"
+        },
+        {
+          "securityRawValue": "2",
+          "ssidHex": "0304"
+        },
+        {
+          "securityRawValue": "9",
+          "ssidHex": "0102"
+        }
+      ],
+      "expectedRemainingProfiles": [
+        {
+          "securityRawValue": "2",
+          "ssidHex": "0304"
+        }
+      ]
+    }
+  ]
+}

@@ -348,12 +348,66 @@ public struct StoreEnvelopeV1: Codable, Equatable, Sendable, VersionedDocument {
             commandResults: commandResults,
             notificationState: notificationState,
             eventLog: eventLog,
+           tombstoneDigest: tombstoneDigest,
+           integrity: newIntegrity
+       )
+   }
+
+    public func updatingStore(
+        now: Date = Date(),
+        globalState: GlobalStateRecord? = nil,
+        selectedProfileID: UUID?? = nil,
+        languageOverride: StoreLanguageOverrideV1? = nil,
+        profiles: [ProfileRecord]? = nil,
+        preferenceTransactions: [PreferenceTransactionRecord]? = nil,
+        commandResults: [CommandResultRecord]? = nil,
+        notificationState: NotificationStateRecord? = nil,
+        eventLog: EventLogRecord? = nil
+    ) throws -> StoreEnvelopeV1 {
+        let newRevision = DecimalUInt64(rawValue: storeRevision.rawValue + 1)
+        let resolvedProfiles = profiles ?? self.profiles
+        let hasCompleted = resolvedProfiles.contains(where: \.isComplete)
+        let resolvedSelectedProfileID: UUID?
+        if let selectedProfileID {
+            resolvedSelectedProfileID = selectedProfileID
+        } else {
+            resolvedSelectedProfileID = self.selectedProfileID
+        }
+
+        let interimIntegrity = try IntegrityRecord(
+            algorithm: IntegrityRecord.algorithm,
+            canonicalDigest: nil,
+            lkgDigest: integrity.canonicalDigest,
+            lastValidatedRevision: newRevision,
+            previousValidatedRevision: storeRevision,
+            validatedAt: now
+        )
+
+        let interimEnvelope = try StoreEnvelopeV1(
+            storeRevision: newRevision,
+            previousGoodRevision: storeRevision,
+            installationID: installationID,
+            hasCompletedProfile: hasCompleted,
+            observedArtifact: observedArtifact,
+            globalState: globalState ?? self.globalState,
+            selectedProfileID: resolvedSelectedProfileID,
+            languageOverride: languageOverride ?? self.languageOverride,
+            profiles: resolvedProfiles,
+            preferenceTransactions: preferenceTransactions ?? self.preferenceTransactions,
+            commandResults: commandResults ?? self.commandResults,
+            notificationState: notificationState ?? self.notificationState,
+            eventLog: eventLog ?? self.eventLog,
             tombstoneDigest: tombstoneDigest,
-            integrity: newIntegrity
+            integrity: interimIntegrity
+        )
+
+        return try interimEnvelope.withSelfBoundDigest(
+            lkgDigest: integrity.canonicalDigest,
+            validatedAt: now
         )
     }
 
-    public func validateSelfBinding() throws {
+   public func validateSelfBinding() throws {
         guard let canonicalDigest = integrity.canonicalDigest else {
             throw StoreEnvelopeValidationError.integrityDigestMismatch
         }
@@ -450,6 +504,63 @@ public struct StoreEnvelopeV1: Codable, Equatable, Sendable, VersionedDocument {
             lkgDigest: integrity.canonicalDigest,
             validatedAt: deletedAt
         )
+    }
+
+    public static func makeInitial(
+        installationID: UUID,
+        observedArtifact: ArtifactObservationRecord? = nil
+    ) throws -> StoreEnvelopeV1 {
+        let revision = DecimalUInt64(rawValue: 1)
+        let effectiveArtifact: ArtifactObservationRecord
+        if let observedArtifact {
+            effectiveArtifact = observedArtifact
+        } else {
+            effectiveArtifact = try ArtifactObservationRecord(
+                compiledModeObserved: .measurementOnly,
+                buildManifestSHA256: String(repeating: "0", count: 64),
+                codeSignatureStatus: .unsigned,
+                hardenedRuntimeStatus: .unavailable,
+                notarizationStatus: .notApplicable,
+                gatekeeperStatus: .notApplicable,
+                quarantineStatus: .absent,
+                macOSBuild: "unknown",
+                observedAt: Date()
+            )
+        }
+        let integrity = try IntegrityRecord(
+            algorithm: IntegrityRecord.algorithm,
+            canonicalDigest: nil,
+            lkgDigest: nil,
+            lastValidatedRevision: revision,
+            previousValidatedRevision: nil,
+            validatedAt: Date()
+        )
+        let emptyTombstones = try TombstoneSetV1(records: [])
+        let tombstoneDigest = try emptyTombstones.canonicalDigest()
+        let envelope = try StoreEnvelopeV1(
+            storeRevision: revision,
+            previousGoodRevision: nil,
+            installationID: installationID,
+            hasCompletedProfile: false,
+            observedArtifact: effectiveArtifact,
+            globalState: try GlobalStateRecord(
+                safetyState: .normal,
+                recoveryReason: nil,
+                timeAdjustment: nil,
+                counterCapability: .pending,
+                identityCapability: .pending
+            ),
+            selectedProfileID: nil,
+            languageOverride: .system,
+            profiles: [],
+            preferenceTransactions: [],
+            commandResults: [],
+            notificationState: NotificationStateRecord(),
+            eventLog: try EventLogRecord(events: []),
+            tombstoneDigest: tombstoneDigest,
+            integrity: integrity
+        )
+        return try envelope.withSelfBoundDigest()
     }
 
     enum CodingKeys: String, CodingKey {
