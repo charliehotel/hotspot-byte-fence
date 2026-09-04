@@ -109,9 +109,18 @@ public actor RuntimeEngine {
         }
 
         guard let primarySnapshot = associated.first else {
-            return try await handle(event: .networkResolutionChanged(identity: nil))
+            let hasUnavailable = observations.contains { observation in
+                if case .identityUnavailable = observation { return true }
+                return false
+            }
+            if hasUnavailable {
+                return try await handle(event: .locationPermissionChanged(isAvailable: false))
+            } else {
+                return try await handle(event: .networkResolutionChanged(identity: nil))
+            }
         }
 
+        _ = try? await handle(event: .locationPermissionChanged(isAvailable: true))
         try await handle(event: .networkResolutionChanged(identity: primarySnapshot))
 
         guard let resolvedProfileID = state.resolvedProfileID,

@@ -99,7 +99,13 @@ INFO_PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSLocationUsageDescription</key>
+    <string>Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 copylawbot. All rights reserved.</string>
@@ -110,11 +116,15 @@ INFO_PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 STRINGS_EN = '''/* English */
 CFBundleDisplayName = "Hotspot Byte Fence";
 NSLocationUsageDescription = "Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.";
+NSLocationWhenInUseUsageDescription = "Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.";
+NSLocationAlwaysAndWhenInUseUsageDescription = "Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.";
 '''
 
 STRINGS_KO = '''/* Korean */
 CFBundleDisplayName = "Hotspot Byte Fence";
 NSLocationUsageDescription = "Hotspot Byte Fence는 핫스팟 데이터 사용량을 모니터링하기 위해 Wi-Fi 네트워크 식별 정보에 접근합니다.";
+NSLocationWhenInUseUsageDescription = "Hotspot Byte Fence는 핫스팟 데이터 사용량을 모니터링하기 위해 Wi-Fi 네트워크 식별 정보에 접근합니다.";
+NSLocationAlwaysAndWhenInUseUsageDescription = "Hotspot Byte Fence는 핫스팟 데이터 사용량을 모니터링하기 위해 Wi-Fi 네트워크 식별 정보에 접근합니다.";
 '''
 
 def package_app(binary_path: Path, output_dir: Path, sign: bool = True, zip_bundle: bool = True):
@@ -159,6 +169,42 @@ def package_app(binary_path: Path, output_dir: Path, sign: bool = True, zip_bund
     ko_lproj.mkdir(parents=True)
     with open(ko_lproj / "InfoPlist.strings", "w", encoding="utf-8") as f:
         f.write(STRINGS_KO)
+
+    app_icon_dir = Path("assets/AppIcon")
+    if app_icon_dir.exists():
+        iconset_dir = output_dir / "AppIcon.iconset"
+        if iconset_dir.exists():
+            shutil.rmtree(iconset_dir)
+        iconset_dir.mkdir(parents=True)
+        mapping = {
+            "AppIcon-16.png": "icon_16x16.png",
+            "AppIcon-32.png": "icon_16x16@2x.png",
+            "AppIcon-32.png": "icon_32x32.png",
+            "AppIcon-64.png": "icon_32x32@2x.png",
+            "AppIcon-128.png": "icon_128x128.png",
+            "AppIcon-256.png": "icon_128x128@2x.png",
+            "AppIcon-256.png": "icon_256x256.png",
+            "AppIcon-512.png": "icon_256x256@2x.png",
+            "AppIcon-512.png": "icon_512x512.png",
+            "AppIcon-1024.png": "icon_512x512@2x.png",
+        }
+        for src_name, dst_name in mapping.items():
+            src_file = app_icon_dir / src_name
+            if src_file.exists():
+                shutil.copy2(src_file, iconset_dir / dst_name)
+        icns_dest = resources_dir / "AppIcon.icns"
+        try:
+            subprocess.run(["iconutil", "-c", "icns", str(iconset_dir), "-o", str(icns_dest)], check=True)
+        except Exception as e:
+            print(f"Warning: iconutil failed: {e}", file=sys.stderr)
+        shutil.rmtree(iconset_dir)
+
+    menubar_assets = Path("assets/MenuBar")
+    if menubar_assets.exists():
+        menubar_dest = resources_dir / "MenuBar"
+        shutil.copytree(menubar_assets, menubar_dest, dirs_exist_ok=True)
+        for f in menubar_assets.glob("*.png"):
+            shutil.copy2(f, resources_dir / f.name)
 
     print(f"Created bundle at: {app_dir}")
 

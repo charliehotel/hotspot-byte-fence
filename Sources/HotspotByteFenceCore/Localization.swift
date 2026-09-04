@@ -297,7 +297,7 @@ public struct Localization: Sendable {
     }
 
     public var saveSettingsButtonTitle: String {
-        isKorean ? "설정 저장 및 핫스팟 등록" : "Save Settings & Register Hotspot"
+        isKorean ? "등록" : "Register"
     }
 
     public var savedSuccessMessage: String {
@@ -334,5 +334,21 @@ public struct Localization: Sendable {
 
     public var unlimitedShortLabel: String {
         isKorean ? "무제한" : "∞"
+    }
+
+    public var statusLocationPermissionRequired: String {
+        isKorean ? "위치 권한 필요" : "Location Permission Required"
+    }
+
+    public var locationPermissionRequiredMessage: String {
+        isKorean ? "Wi-Fi 네트워크 이름을 확인하려면 위치 권한이 필요합니다. (시스템 설정 > 개인정보 보호 및 보안 > 위치 서비스)" : "Location permission is required to read Wi-Fi network identity. (System Settings > Privacy & Security > Location Services)"
+    }
+
+    public var openLocationSettingsTitle: String {
+        isKorean ? "위치 권한 허용 및 설정 열기..." : "Grant Location Permission..."
+    }
+
+    public var grantButtonTitle: String {
+        isKorean ? "권한 허용" : "Grant"
     }
 }

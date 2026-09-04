@@ -152,7 +152,7 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(disconnectedVM.profileName, "LTE-Router")
         XCTAssertEqual(disconnectedVM.usageState, .normal)
         XCTAssertEqual(disconnectedVM.currentUsageText, "1.00GB")
-        XCTAssertEqual(disconnectedVM.limitText, "5.00GB")
+        XCTAssertEqual(disconnectedVM.limitText, "5GB")
         XCTAssertNil(disconnectedVM.percentageText)
         XCTAssertEqual(disconnectedVM.pauseBlockingToggleTitle, "차단 일시정지")
 
@@ -273,5 +273,10 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(SettingsTab.profile.rawValue, "profile")
         XCTAssertEqual(SettingsTab.notices.rawValue, "notices")
         #endif
+
+        XCTAssertEqual(MenuBarViewModel.formatLimitGB(ByteCount(5_000_000_000)), "5GB")
+        XCTAssertEqual(MenuBarViewModel.formatLimitGB(ByteCount(10_000_000_000)), "10GB")
+        XCTAssertEqual(MenuBarViewModel.formatLimitGB(ByteCount(500_000_000)), "0.5GB")
+        XCTAssertEqual(MenuBarViewModel.formatLimitGB(ByteCount(12_500_000_000)), "12.5GB")
     }
 }

@@ -2,6 +2,9 @@ import Foundation
 #if canImport(AppKit) && canImport(SwiftUI)
 import AppKit
 import SwiftUI
+#if canImport(CoreLocation)
+import CoreLocation
+#endif
 
 public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     case profile
@@ -94,21 +97,42 @@ public final class SettingsState: ObservableObject {
             guard let self else { return }
             if let identity = await self.engine.currentResolvedIdentity() {
                 _ = try? await self.engine.createOrUpdateProfile(
-                    alias: self.alias.isEmpty ? "핫스팟" : self.alias,
+                    alias: self.alias.isEmpty ? self.localization.defaultHotspotAlias : self.alias,
                     limitBytes: limitBytes,
                     resetDay: day,
                     interfaceName: identity.interfaceName,
                     ssidHex: identity.ssid.hex,
                     bssid: identity.bssid
                 )
+                _ = try? await self.engine.performPeriodicTick()
                 self.savedMessage = self.localization.savedSuccessMessage
+                await MainActor.run {
+                    SettingsWindowController.shared.close()
+                }
             } else if let profileID = await self.engine.currentSnapshot().selectedProfileID {
                 _ = try? await self.engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
                 _ = try? await self.engine.changeResetDay(profileID: profileID, newResetDay: day)
+                _ = try? await self.engine.performPeriodicTick()
                 self.savedMessage = self.localization.savedLimitAndResetDayMessage
+                await MainActor.run {
+                    SettingsWindowController.shared.close()
+                }
             } else {
-                self.savedMessage = self.localization.savedNoWiFiMessage
+                self.savedMessage = self.localization.locationPermissionRequiredMessage
             }
+        }
+    }
+
+    public func requestLocationPermission() {
+        #if canImport(CoreLocation)
+        let manager = CLLocationManager()
+        if manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+            return
+        }
+        #endif
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -282,6 +306,18 @@ public struct SettingsView: View {
                                     Text("(\(ifName))").foregroundColor(.secondary)
                                 }
                             }
+                        } else {
+                            HStack {
+                                Text(state.localization.detectedWiFiLabel)
+                                    .frame(width: 110, alignment: .trailing)
+                                Text(state.localization.statusLocationPermissionRequired)
+                                    .foregroundColor(.secondary)
+                                Button(state.localization.grantButtonTitle) {
+                                    state.requestLocationPermission()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
                     }
                     .padding(6)
@@ -389,6 +425,10 @@ public final class SettingsWindowController {
         self.window = win
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    public func close() {
+        self.window?.close()
     }
 
     public func updateLocalization(_ localization: Localization) {

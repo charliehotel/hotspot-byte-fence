@@ -9,6 +9,10 @@ import Darwin
 import CoreWLAN
 #endif
 
+#if canImport(CoreLocation)
+import CoreLocation
+#endif
+
 #if canImport(AppKit)
 import AppKit
 
@@ -18,9 +22,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine: RuntimeEngine?
     private var localization = Localization()
     private let loginController: LoginItemControlling = DarwinLoginItemController()
+#if canImport(CoreLocation)
+    private var locationManager: CLLocationManager?
+#endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
+#if canImport(CoreLocation)
+        setupLocationManager()
+#endif
         startEngine()
     }
 
@@ -41,10 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.localization = Localization(language: appLang)
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
         let vm = snapshot.map { MenuBarViewModel(snapshot: $0, localization: localization) }
 
         let headerItem = NSMenuItem(title: "Hotspot Byte Fence", action: nil, keyEquivalent: "")
-        headerItem.isEnabled = false
+        headerItem.isEnabled = true
         headerItem.image = NSImage(systemSymbolName: "shield.fill", accessibilityDescription: nil)
         menu.addItem(headerItem)
 
@@ -58,24 +69,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .monitoring: statusText = localization.statusMonitoring
             case .needsBSSIDConfirmation: statusText = localization.statusNeedsBSSIDConfirmation
             case .unknownNetwork: statusText = localization.statusUnknownNetwork
+            case .locationPermissionRequired: statusText = localization.statusLocationPermissionRequired
             default: statusText = localization.statusDetected
             }
         } else {
             wifiName = localization.statusNotConnected
-            statusText = localization.statusWaitingForWiFi
+            if snapshot?.connectionState == .locationPermissionRequired {
+                statusText = localization.statusLocationPermissionRequired
+            } else {
+                statusText = localization.statusWaitingForWiFi
+            }
         }
 
+        let isRegistered = (snapshot?.connectedProfileID != nil)
         let wifiItem = NSMenuItem(title: "Wi-Fi: \(wifiName) (\(statusText))", action: nil, keyEquivalent: "")
-        wifiItem.isEnabled = false
+        wifiItem.isEnabled = isRegistered
         wifiItem.image = NSImage(systemSymbolName: identity != nil ? "wifi" : "wifi.slash", accessibilityDescription: nil)
         wifiItem.setAccessibilityIdentifier("Menu.Profile.Connected")
         menu.addItem(wifiItem)
 
+        if snapshot?.connectionState == .locationPermissionRequired {
+            let permItem = NSMenuItem(
+                title: localization.openLocationSettingsTitle,
+                action: #selector(openLocationSettings),
+                keyEquivalent: ""
+            )
+            permItem.target = self
+            permItem.image = NSImage(systemSymbolName: "location.circle.fill", accessibilityDescription: nil)
+            menu.addItem(permItem)
+        }
+
         let usageTitle = vm?.currentUsageText ?? Localization.disconnectedDash
         let limitTitle = vm?.limitText ?? localization.menuLimitNotSet
         let percentStr = vm?.percentageText.map { " (\($0))" } ?? ""
+        let isLimitSet = (snapshot?.currentLimitBytes != nil)
         let usageItem = NSMenuItem(title: "\(localization.menuUsagePrefix) \(usageTitle) / \(limitTitle)\(percentStr)", action: nil, keyEquivalent: "")
-        usageItem.isEnabled = false
+        usageItem.isEnabled = isLimitSet
         usageItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: nil)
         usageItem.setAccessibilityIdentifier("Status.Measurement")
         menu.addItem(usageItem)
@@ -83,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let profileID = snapshot?.selectedProfileID,
            let profile = store?.profiles.first(where: { $0.profileID == profileID }) {
             let resetItem = NSMenuItem(title: localization.formatResetDay(day: profile.resetDay), action: nil, keyEquivalent: "")
-            resetItem.isEnabled = false
+            resetItem.isEnabled = true
             resetItem.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
             menu.addItem(resetItem)
         }
@@ -92,15 +121,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let limitMenu = NSMenu()
         let presetLimits: [Double] = [5, 10, 15, 20, 30, 50, 100]
+        let isUnlimitedCurrent = (snapshot?.currentLimitBytes?.rawValue ?? 0) >= ProfileRecord.maximumLimitBytes
         for gb in presetLimits {
             let item = NSMenuItem(title: "\(Int(gb)) GB", action: #selector(setPresetLimit(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = gb
-            if let currentLimit = vm?.limitText, currentLimit.hasPrefix("\(Int(gb)).") {
+            if !isUnlimitedCurrent, let currentLimit = vm?.limitText, currentLimit == "\(Int(gb))GB" {
                 item.state = .on
             }
             limitMenu.addItem(item)
         }
+
+        let unlimitedItem = NSMenuItem(
+            title: localization.unlimitedLabel,
+            action: #selector(setUnlimitedLimit),
+            keyEquivalent: ""
+        )
+        unlimitedItem.target = self
+        unlimitedItem.state = isUnlimitedCurrent ? .on : .off
+        limitMenu.addItem(unlimitedItem)
+
         let customLimitItem = NSMenuItem(title: localization.menuCustomInput, action: #selector(promptCustomLimit), keyEquivalent: "")
         customLimitItem.target = self
         customLimitItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
@@ -246,9 +286,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         statusItem?.menu = menu
+        let isBlocked = (snapshot?.protectionState == .limitReached)
+        let icon = menuBarImage(for: vm?.usageState ?? .normal, isBlocked: isBlocked)
+        statusItem?.button?.image = icon
+        statusItem?.button?.imagePosition = .imageLeading
         if let title = vm?.displayTitle {
             statusItem?.button?.title = title
         }
+    }
+
+    private func makeMenuBarImage(baseName: String) -> NSImage? {
+        let rep1xURL = Bundle.main.url(forResource: "\(baseName)-18", withExtension: "png")
+            ?? Bundle.main.url(forResource: "\(baseName)-18", withExtension: "png", subdirectory: "MenuBar")
+            ?? URL(fileURLWithPath: "assets/MenuBar/\(baseName)-18.png")
+        let rep2xURL = Bundle.main.url(forResource: "\(baseName)-36", withExtension: "png")
+            ?? Bundle.main.url(forResource: "\(baseName)-36", withExtension: "png", subdirectory: "MenuBar")
+            ?? URL(fileURLWithPath: "assets/MenuBar/\(baseName)-36.png")
+
+        guard let img1x = NSImage(contentsOf: rep1xURL) else { return nil }
+        let result = NSImage(size: NSSize(width: 18, height: 18))
+        if let rep1 = img1x.representations.first {
+            result.addRepresentation(rep1)
+        }
+        if let img2x = NSImage(contentsOf: rep2xURL), let rep2 = img2x.representations.first {
+            rep2.size = NSSize(width: 18, height: 18)
+            result.addRepresentation(rep2)
+        }
+        result.isTemplate = true
+        return result
+    }
+
+    private func menuBarImage(for state: MenuBarUsageState, isBlocked: Bool) -> NSImage? {
+        let baseName: String
+        if isBlocked || state == .limitReached {
+            baseName = "blocked_template"
+        } else {
+            switch state {
+            case .normal: baseName = "normal_template"
+            case .notice: baseName = "notice50_template"
+            case .warning: baseName = "warning80_template"
+            case .critical: baseName = "critical90_template"
+            case .limitReached: baseName = "blocked_template"
+            }
+        }
+        return makeMenuBarImage(baseName: baseName)
     }
 
     @objc private func togglePauseBlocking() {
@@ -281,6 +362,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 openSettingsWindow()
             }
+            _ = try? await engine.performPeriodicTick()
+        }
+    }
+
+    @objc private func setUnlimitedLimit() {
+        guard let engine else { return }
+        let limitBytes = ByteCount(ProfileRecord.maximumLimitBytes)
+        Task {
+            let snapshot = await engine.currentSnapshot()
+            if let profileID = snapshot.selectedProfileID {
+                _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
+            } else if let identity = await engine.currentResolvedIdentity() {
+                let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
+                _ = try? await engine.createOrUpdateProfile(
+                    alias: name,
+                    limitBytes: limitBytes,
+                    resetDay: 1,
+                    interfaceName: identity.interfaceName,
+                    ssidHex: identity.ssid.hex,
+                    bssid: identity.bssid
+                )
+            } else {
+                openSettingsWindow()
+            }
+            _ = try? await engine.performPeriodicTick()
         }
     }
 
@@ -371,12 +477,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ssidHex: identity.ssid.hex,
                 bssid: identity.bssid
             )
+            _ = try? await engine.performPeriodicTick()
         }
     }
 
     @objc private func openSettingsWindow() {
         guard let engine else { return }
         SettingsWindowController.shared.show(engine: engine, localization: localization)
+    }
+
+    @objc private func openLocationSettings() {
+        #if canImport(CoreLocation)
+        if let manager = locationManager, manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+            return
+        }
+        #endif
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func updateLanguage(override: StoreLanguageOverrideV1) {
@@ -459,13 +578,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let store = try JournaledStateStore<StoreEnvelopeV1>(directory: appSupport)
             let loadResult = try store.loadEnvelope()
-            let envelope: StoreEnvelopeV1
+            var envelope: StoreEnvelopeV1
             switch loadResult {
             case .loaded(let env):
                 envelope = env
-            case .firstRun, .recoveryRequired:
-                envelope = try StoreEnvelopeV1.makeInitial(installationID: store.installationID)
-                try? store.commit(envelope, operation: .firstCompletedProfile)
+            case .firstRun:
+                let initial = try StoreEnvelopeV1.makeInitial(installationID: store.installationID)
+                try? store.commitEnvelope(initial, operation: .measurementSample)
+                envelope = initial
+            case .recoveryRequired:
+                if let recovered = try? store.recoverFromLKG() {
+                    envelope = recovered
+                } else if let stateData = try? Data(contentsOf: appSupport.appendingPathComponent("state.json")),
+                          let savedEnv = try? StoreJSONCodec.decode(StoreEnvelopeV1.self, from: stateData) {
+                    try? store.commitEnvelope(savedEnv, operation: .measurementSample)
+                    envelope = savedEnv
+                } else {
+                    let initial = try StoreEnvelopeV1.makeInitial(installationID: store.installationID)
+                    try? store.commitEnvelope(initial, operation: .measurementSample)
+                    envelope = initial
+                }
+            }
+
+            if envelope.globalState.safetyState == .recoveryRequired {
+                let newGlobal = try? GlobalStateRecord(
+                    safetyState: .normal,
+                    recoveryReason: nil,
+                    timeAdjustment: nil,
+                    counterCapability: envelope.globalState.counterCapability,
+                    identityCapability: envelope.globalState.identityCapability
+                )
+                if let newGlobal, let normalized = try? envelope.updatingStore(globalState: newGlobal) {
+                    try? store.commitEnvelope(normalized, operation: .measurementSample)
+                    envelope = normalized
+                }
             }
 
             let counterSource = DarwinInterfaceCounterSource()
@@ -494,6 +640,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+#if canImport(CoreLocation)
+extension AppDelegate: CLLocationManagerDelegate {
+    private func setupLocationManager() {
+        let manager = CLLocationManager()
+        manager.delegate = self
+        self.locationManager = manager
+        if manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        let isAuthorized = (status == .authorizedAlways || status == .authorized)
+        Task { @MainActor [weak self] in
+            guard let self, let engine = self.engine else { return }
+            _ = try? await engine.setLocationPermissionAvailable(isAuthorized)
+            _ = try? await engine.performPeriodicTick()
+            let snapshot = await engine.currentSnapshot()
+            let identity = await engine.currentResolvedIdentity()
+            let store = await engine.currentStore()
+            self.rebuildMenu(snapshot: snapshot, identity: identity, store: store)
+            SettingsWindowController.shared.updateLocalization(self.localization)
+        }
+    }
+}
+#endif
 #endif
 
 @main

@@ -79,7 +79,8 @@ public final class JournaledStateStore<Document: VersionedDocument>: @unchecked 
 
     func validateFile(at url: URL, equals expected: Document) throws {
         let actual = try decodeFile(at: url)
-        guard actual == expected, actual.storeRevision == expected.storeRevision else {
+        let canonicalExpected = (try? StoreJSONCodec.decode(Document.self, from: try StoreJSONCodec.encode(expected))) ?? expected
+        guard actual == canonicalExpected, actual.storeRevision == expected.storeRevision else {
             throw PersistenceError.validationFailed
         }
     }

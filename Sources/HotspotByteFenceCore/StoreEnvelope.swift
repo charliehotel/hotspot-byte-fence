@@ -364,6 +364,7 @@ public struct StoreEnvelopeV1: Codable, Equatable, Sendable, VersionedDocument {
         notificationState: NotificationStateRecord? = nil,
         eventLog: EventLogRecord? = nil
     ) throws -> StoreEnvelopeV1 {
+        let canonicalNow = Date(timeIntervalSince1970: (now.timeIntervalSince1970 * 1000).rounded() / 1000)
         let newRevision = DecimalUInt64(rawValue: storeRevision.rawValue + 1)
         let resolvedProfiles = profiles ?? self.profiles
         let hasCompleted = resolvedProfiles.contains(where: \.isComplete)
@@ -380,7 +381,7 @@ public struct StoreEnvelopeV1: Codable, Equatable, Sendable, VersionedDocument {
             lkgDigest: integrity.canonicalDigest,
             lastValidatedRevision: newRevision,
             previousValidatedRevision: storeRevision,
-            validatedAt: now
+            validatedAt: canonicalNow
         )
 
         let interimEnvelope = try StoreEnvelopeV1(
@@ -403,7 +404,7 @@ public struct StoreEnvelopeV1: Codable, Equatable, Sendable, VersionedDocument {
 
         return try interimEnvelope.withSelfBoundDigest(
             lkgDigest: integrity.canonicalDigest,
-            validatedAt: now
+            validatedAt: canonicalNow
         )
     }
 

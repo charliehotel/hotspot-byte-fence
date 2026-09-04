@@ -48,11 +48,16 @@ public struct MenuBarViewModel: Equatable, Sendable {
             self.currentUsageText = UsageFormatter.formatGB(usage)
 
             if let limit = snapshot.currentLimitBytes, limit.rawValue > 0 {
-                self.usageState = MenuBarUsageState.from(usageBytes: usage, limitBytes: limit)
-                self.limitText = UsageFormatter.formatGB(limit)
-
-                let ratio = Double(usage.rawValue) / Double(limit.rawValue) * 100.0
-                self.percentageText = String(format: "%.1f%%", ratio)
+                if limit.rawValue >= ProfileRecord.maximumLimitBytes {
+                    self.usageState = .normal
+                    self.limitText = localization.effectiveLanguage == .korean ? "무제한 (∞)" : "Unlimited (∞)"
+                    self.percentageText = nil
+                } else {
+                    self.usageState = MenuBarUsageState.from(usageBytes: usage, limitBytes: limit)
+                    self.limitText = Self.formatLimitGB(limit)
+                    let ratio = Double(usage.rawValue) / Double(limit.rawValue) * 100.0
+                    self.percentageText = String(format: "%.1f%%", ratio)
+                }
             } else {
                 self.usageState = .normal
                 self.limitText = nil
@@ -67,7 +72,11 @@ public struct MenuBarViewModel: Equatable, Sendable {
                 self.currentUsageText = Localization.disconnectedDash
             }
             if let limit = snapshot.currentLimitBytes {
-                self.limitText = UsageFormatter.formatGB(limit)
+                if limit.rawValue >= ProfileRecord.maximumLimitBytes {
+                    self.limitText = localization.effectiveLanguage == .korean ? "무제한 (∞)" : "Unlimited (∞)"
+                } else {
+                    self.limitText = Self.formatLimitGB(limit)
+                }
             } else {
                 self.limitText = nil
             }
@@ -77,5 +86,18 @@ public struct MenuBarViewModel: Equatable, Sendable {
         self.pauseBlockingToggleTitle = snapshot.isPauseBlockingActive
             ? localization.menuResumeBlocking
             : localization.menuPauseBlocking
+    }
+
+    public static func formatLimitGB(_ limit: ByteCount) -> String {
+        let gb = Double(limit.rawValue) / 1_000_000_000.0
+        if gb.truncatingRemainder(dividingBy: 1.0) == 0 {
+            return "\(Int(gb))GB"
+        } else {
+            let formatted = String(format: "%.2f", gb)
+            if formatted.hasSuffix("0") {
+                return "\(String(format: "%.1f", gb))GB"
+            }
+            return "\(formatted)GB"
+        }
     }
 }

@@ -26,7 +26,13 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSLocationUsageDescription</key>
+    <string>Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Hotspot Byte Fence requires Wi-Fi network identity to monitor hotspot data usage.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 copylawbot. All rights reserved.</string>
