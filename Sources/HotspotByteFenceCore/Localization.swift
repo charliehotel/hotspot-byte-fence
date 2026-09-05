@@ -105,8 +105,8 @@ public struct Localization: Sendable {
 
     public func limitReachedNotificationBody(profileName: String, limitGB: String) -> String {
         isKorean
-            ? "설정한 데이터 한도(\(limitGB))에 도달하여 핫스팟 보호 조치가 적용되었습니다."
-            : "The configured data limit (\(limitGB)) has been reached. Hotspot protection has been applied."
+            ? "목표 사용량(\(limitGB))에 도달하여 핫스팟 연결을 차단하였습니다."
+            : "The configured data limit (\(limitGB)) has been reached. Hotspot connection has been disconnected."
     }
 
     public func warningThresholdNotificationTitle(profileName: String) -> String {

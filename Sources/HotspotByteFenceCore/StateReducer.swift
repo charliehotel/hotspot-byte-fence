@@ -300,6 +300,12 @@ public enum StateReducer {
             ) {
                 newState.store = updatedStore
                 effects.append(.persistStore(updatedStore))
+                if let profile = updatedStore.profiles.first(where: { $0.profileID == profileID }),
+                   profile.protection.limitReached, !profile.protection.pauseBlocking,
+                   let interfaceName = profile.interfaceName {
+                    effects.append(.disassociate(interfaceName: interfaceName))
+                }
+
             }
 
         case let .createOrUpdateProfile(alias, limitBytes, resetDay, interfaceName, ssidHex, bssid):
@@ -431,7 +437,7 @@ public enum StateReducer {
                        newState.measurementStates[profile.profileID] = accumulator.state
                        effects.append(.persistStore(updatedStore))
                    }
-                    if reached && !profile.protection.limitReached && !profile.protection.pauseBlocking,
+                    if reached && !profile.protection.pauseBlocking,
                        let interfaceName = profile.interfaceName {
                         effects.append(.disassociate(interfaceName: interfaceName))
                     }

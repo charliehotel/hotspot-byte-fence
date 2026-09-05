@@ -357,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let limitBytes = ByteCount(UInt64(gb * 1_000_000_000.0))
         Task {
             let snapshot = await engine.currentSnapshot()
-            if let profileID = snapshot.selectedProfileID {
+            if let profileID = snapshot.selectedProfileID ?? snapshot.connectedProfileID {
                 _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
             } else if let identity = await engine.currentResolvedIdentity() {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
@@ -381,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let limitBytes = ByteCount(ProfileRecord.maximumLimitBytes)
         Task {
             let snapshot = await engine.currentSnapshot()
-            if let profileID = snapshot.selectedProfileID {
+            if let profileID = snapshot.selectedProfileID ?? snapshot.connectedProfileID {
                 _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
             } else if let identity = await engine.currentResolvedIdentity() {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
@@ -418,7 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let engine else { return }
                 Task {
                     let snapshot = await engine.currentSnapshot()
-                    if let profileID = snapshot.selectedProfileID {
+                    if let profileID = snapshot.selectedProfileID ?? snapshot.connectedProfileID {
                         _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
                     } else if let identity = await engine.currentResolvedIdentity() {
                         let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
@@ -431,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             bssid: identity.bssid
                         )
                     }
+                    _ = try? await engine.performPeriodicTick()
                 }
             }
         }
@@ -623,15 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     envelope = normalized
                 }
             }
-
-            let counterSource = DarwinInterfaceCounterSource()
-            let identitySource = CoreWLANIdentityAdapter()
-            let newEngine = RuntimeEngine(
-                store: store,
-                initialEnvelope: envelope,
-                counterSource: counterSource,
-                identitySource: identitySource
-            )
+            let newEngine = RuntimeEngine(store: store, initialEnvelope: envelope)
             self.engine = newEngine
 
             let snapshots = newEngine.snapshots
@@ -660,7 +653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let usage = snapshot.currentUsageBytes,
               let limit = snapshot.currentLimitBytes,
               limit.rawValue > 0,
-              let profileID = snapshot.connectedProfileID,
+              let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID,
               let profile = store.profiles.first(where: { $0.profileID == profileID }) else {
             return
         }
@@ -670,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cycleDate = profile.cycle.cycleID.effectiveDate
         let notifRecord = store.notificationState.profileNotificationStates[profileID] ?? (try? ProfileNotificationRecord()) ?? (try! ProfileNotificationRecord())
 
-        if snapshot.protectionState == .limitReached && lastNotifiedPercent < 100 {
+        if (snapshot.protectionState == .limitReached || percent >= 100) && lastNotifiedPercent < 100 {
             lastNotifiedPercent = 100
             if case .deliver = (try? NotificationEvaluator.evaluateLimitReached(
                 record: notifRecord, currentCycleDate: cycleDate

@@ -30,13 +30,13 @@ final class LocalizationAndNotificationTests: XCTestCase {
     func testLocalizationNotificationStrings() {
         let korean = Localization(language: .korean)
         XCTAssertEqual(korean.limitReachedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] 데이터 한도 도달")
-        XCTAssertEqual(korean.limitReachedNotificationBody(profileName: "MyHotspot", limitGB: "4.50GB"), "설정한 데이터 한도(4.50GB)에 도달하여 핫스팟 보호 조치가 적용되었습니다.")
+        XCTAssertEqual(korean.limitReachedNotificationBody(profileName: "MyHotspot", limitGB: "4.50GB"), "목표 사용량(4.50GB)에 도달하여 핫스팟 연결을 차단하였습니다.")
         XCTAssertEqual(korean.blockingFailedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] 차단 실패 경고")
         XCTAssertEqual(korean.blockingFailedNotificationBody(profileName: "MyHotspot", reason: "timeout"), "핫스팟 데이터 차단에 실패했습니다: timeout")
 
         let english = Localization(language: .english)
         XCTAssertEqual(english.limitReachedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] Data Limit Reached")
-        XCTAssertEqual(english.limitReachedNotificationBody(profileName: "MyHotspot", limitGB: "4.50GB"), "The configured data limit (4.50GB) has been reached. Hotspot protection has been applied.")
+        XCTAssertEqual(english.limitReachedNotificationBody(profileName: "MyHotspot", limitGB: "4.50GB"), "The configured data limit (4.50GB) has been reached. Hotspot connection has been disconnected.")
         XCTAssertEqual(english.blockingFailedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] Blocking Failure Warning")
         XCTAssertEqual(english.blockingFailedNotificationBody(profileName: "MyHotspot", reason: "timeout"), "Failed to enforce hotspot data block: timeout")
     }

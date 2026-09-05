@@ -178,13 +178,15 @@ public actor RuntimeEngine {
     public func startPeriodicPolling(intervalSeconds: TimeInterval = 5.0) {
         stopPeriodicPolling()
         periodicPollingTask = Task { [weak self] in
+            guard let self else { return }
+            _ = try? await self.performPeriodicTick()
+
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(nanoseconds: UInt64(intervalSeconds * 1_000_000_000))
                 } catch {
                     break
                 }
-                guard let self else { break }
                 _ = try? await self.performPeriodicTick()
             }
         }
@@ -327,12 +329,15 @@ public actor RuntimeEngine {
     }
 
     private func performDisassociate() async {
-        guard let adapter = preferenceAdapter,
-              let resolvedProfileID = state.resolvedProfileID,
-              let profile = state.store.profiles.first(where: { $0.profileID == resolvedProfileID }),
+        guard let adapter = preferenceAdapter else { return }
+        let targetProfile = state.resolvedProfileID.flatMap { id in
+            state.store.profiles.first(where: { $0.profileID == id })
+        } ?? state.store.profiles.first(where: { $0.protection.limitReached && !$0.protection.pauseBlocking })
+        guard let profile = targetProfile,
               let interfaceName = profile.interfaceName else {
             return
         }
+        let resolvedProfileID = profile.profileID
         let executor = PreferenceTransactionExecutor()
         let currentEnvelope = state.store
         do {
@@ -351,6 +356,7 @@ public actor RuntimeEngine {
             )
         } catch {
             fputs("Disassociate failed: \(error)\n", stderr)
+            try? adapter.disassociate(interfaceName: interfaceName)
             scheduleEnforcementRetry(profileID: resolvedProfileID, delaySeconds: 30)
         }
     }

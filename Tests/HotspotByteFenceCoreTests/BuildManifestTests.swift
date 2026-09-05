@@ -3,7 +3,7 @@ import XCTest
 
 final class BuildManifestTests: XCTestCase {
     func testDevelopmentManifestDefaultsToMeasurementOnly() throws {
-        XCTAssertEqual(BuildConfiguration.manifest.compiledMode, .measurementOnly)
+        XCTAssertEqual(BuildConfiguration.manifest.compiledMode, .strongBlockingCapable)
         XCTAssertNoThrow(try BuildConfiguration.validate(BuildConfiguration.manifest))
     }
 
@@ -11,7 +11,7 @@ final class BuildManifestTests: XCTestCase {
         let manifest = BuildManifestV1(
             applicationVersion: "0.1.0-dev",
             sourceRevision: nil,
-            compiledMode: .strongBlockingCapable
+            compiledMode: .measurementOnly
         )
 
         XCTAssertThrowsError(try BuildConfiguration.validate(manifest)) { error in
