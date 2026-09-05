@@ -256,6 +256,26 @@ public struct Localization: Sendable {
         isKorean ? "직접 입력 (1~31일)..." : "Custom (Days 1~31)..."
     }
 
+    public var menuProfilesTitle: String {
+        isKorean ? "프로필" : "Profiles"
+    }
+
+    public var menuRegisterProfileTitle: String {
+        isKorean ? "프로필 등록..." : "Register Profile..."
+    }
+
+    public var menuNoProfilesRegistered: String {
+        isKorean ? "(등록된 프로필 없음)" : "(No Registered Profiles)"
+    }
+
+    public func formatEditProfile(alias: String) -> String {
+        isKorean ? "'\(alias)' 편집..." : "Edit '\(alias)'..."
+    }
+
+    public var menuEditProfileTitle: String {
+        isKorean ? "프로필 편집..." : "Edit Profile..."
+    }
+
     public func formatRegisterHotspot(ssid: String) -> String {
         isKorean ? "'\(ssid)'를 핫스팟으로 등록..." : "Register '\(ssid)' as Hotspot..."
     }

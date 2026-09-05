@@ -302,6 +302,53 @@ final class StateReducerTests: XCTestCase {
         XCTAssertTrue(muteEffects.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
     }
 
+    func testProfileLimitEditRequestsDisassociateUnlessBlockingIsPaused() throws {
+        let identity = WiFiIdentitySnapshot(
+            interfaceName: "en0",
+            interfaceIndex: 1,
+            linkState: .associated,
+            ssid: try SSID(hex: ssidHex),
+            bssid: bssid1
+        )
+        var state = try makeInitialState()
+        let profile = state.store.profiles[0]
+        let overLimitMeasurement = try MeasurementRecord.initial(usageBytes: ByteCount(200_000_000))
+        state.store = try state.store.updatingStore(profiles: [try profile.updating(measurement: overLimitMeasurement)])
+        state.resolvedIdentity = identity
+        state.resolvedProfileID = profileID
+        state.connectionState = .monitoring
+
+        let (_, effects) = StateReducer.reduce(
+            state: state,
+            event: .createOrUpdateProfile(
+                alias: "Edited Hotspot",
+                limitBytes: ByteCount(100_000_000),
+                resetDay: 1,
+                interfaceName: "en0",
+                ssidHex: ssidHex,
+                bssid: bssid1
+            )
+        )
+        XCTAssertTrue(effects.contains(.disassociate(interfaceName: "en0")))
+
+        let (pausedState, _) = StateReducer.reduce(
+            state: state,
+            event: .pauseBlockingToggled(profileID: profileID, isPaused: true)
+        )
+        let (_, pausedEffects) = StateReducer.reduce(
+            state: pausedState,
+            event: .createOrUpdateProfile(
+                alias: "Edited Hotspot",
+                limitBytes: ByteCount(100_000_000),
+                resetDay: 1,
+                interfaceName: "en0",
+                ssidHex: ssidHex,
+                bssid: bssid1
+            )
+        )
+        XCTAssertFalse(pausedEffects.contains(.disassociate(interfaceName: "en0")))
+    }
+
     private func makeInitialState() throws -> RuntimeEngineState {
         let envelope = try makeEnvelope()
         return RuntimeEngineState(store: envelope)

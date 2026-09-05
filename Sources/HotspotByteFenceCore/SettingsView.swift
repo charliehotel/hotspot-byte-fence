@@ -28,10 +28,16 @@ public final class SettingsState: ObservableObject {
     @Published public var currentInterface: String?
     @Published public var savedMessage: String?
     private var isUpdatingFromSlider: Bool = false
+    private var isRegisteringProfile: Bool
 
-    public init(engine: RuntimeEngine, localization: Localization = Localization()) {
+    public init(
+        engine: RuntimeEngine,
+        localization: Localization = Localization(),
+        registeringProfile: Bool = false
+    ) {
         self.engine = engine
         self.localization = localization
+        self.isRegisteringProfile = registeringProfile
         self.alias = localization.defaultHotspotAlias
         self.sliderPosition = gbToSliderPosition(10.0)
         refreshFromEngine()
@@ -53,7 +59,8 @@ public final class SettingsState: ObservableObject {
                 self.alias = newLoc.defaultHotspotAlias
             }
 
-            if let identity = await self.engine.currentResolvedIdentity() {
+            let resolvedIdentity = await self.engine.currentResolvedIdentity()
+            if let identity = resolvedIdentity {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
                 self.currentSSID = name
                 self.currentBSSID = identity.bssid.description
@@ -63,17 +70,46 @@ public final class SettingsState: ObservableObject {
                 }
             }
             let snapshot = await self.engine.currentSnapshot()
-            if let limit = snapshot.currentLimitBytes {
-                let gb = Double(limit.rawValue) / 1_000_000_000.0
-                self.limitGBText = String(format: "%.1f", gb)
-                self.sliderPosition = self.gbToSliderPosition(gb)
-            }
-            if let profileID = snapshot.selectedProfileID,
-               let profile = store.profiles.first(where: { $0.profileID == profileID }) {
-                self.resetDay = Int(profile.resetDay)
-                self.alias = profile.aliasNFC
+            if self.isRegisteringProfile {
+                if let identity = resolvedIdentity,
+                   let profile = store.profiles.first(where: {
+                       $0.interfaceName == identity.interfaceName && $0.ssidHex == identity.ssid.hex
+                   }) {
+                    let gb = Double(profile.limitBytes.rawValue) / 1_000_000_000.0
+                    self.limitGBText = String(format: "%.1f", gb)
+                    self.sliderPosition = self.gbToSliderPosition(gb)
+                    self.resetDay = Int(profile.resetDay)
+                    self.alias = profile.aliasNFC
+                }
+            } else {
+                if let limit = snapshot.currentLimitBytes {
+                    let gb = Double(limit.rawValue) / 1_000_000_000.0
+                    self.limitGBText = String(format: "%.1f", gb)
+                    self.sliderPosition = self.gbToSliderPosition(gb)
+                }
+                if let profileID = snapshot.selectedProfileID,
+                   let profile = store.profiles.first(where: { $0.profileID == profileID }) {
+                    self.resetDay = Int(profile.resetDay)
+                    self.alias = profile.aliasNFC
+                }
             }
         }
+    }
+
+    public func prepareForProfileRegistration() {
+        isRegisteringProfile = true
+        alias = localization.defaultHotspotAlias
+        limitGBText = "10.0"
+        sliderPosition = gbToSliderPosition(10.0)
+        isUnlimited = false
+        resetDay = 1
+        savedMessage = nil
+        refreshFromEngine()
+    }
+
+    public func prepareForProfileEditing() {
+        isRegisteringProfile = false
+        refreshFromEngine()
     }
 
     public func saveProfile() {
@@ -95,7 +131,31 @@ public final class SettingsState: ObservableObject {
         let day = UInt(max(1, min(31, resetDay)))
         Task { [weak self] in
             guard let self else { return }
-            if let identity = await self.engine.currentResolvedIdentity() {
+            let store = await self.engine.currentStore()
+            let snapshot = await self.engine.currentSnapshot()
+            let selectedID = self.isRegisteringProfile ? nil : snapshot.selectedProfileID
+            let targetProfile = selectedID.flatMap { id in store.profiles.first(where: { $0.profileID == id }) }
+
+            if let targetProfile {
+                let identity = await self.engine.currentResolvedIdentity()
+                let interface = targetProfile.interfaceName ?? identity?.interfaceName ?? "en0"
+                let fallbackBSSID = identity?.bssid ?? (try! BSSID(bytes: [0, 0, 0, 0, 0, 0]))
+                let bssid = targetProfile.confirmedBSSIDs.first ?? fallbackBSSID
+                let ssidHex = targetProfile.ssidHex ?? identity?.ssid.hex ?? ""
+                _ = try? await self.engine.createOrUpdateProfile(
+                    alias: self.alias.isEmpty ? self.localization.defaultHotspotAlias : self.alias,
+                    limitBytes: limitBytes,
+                    resetDay: day,
+                    interfaceName: interface,
+                    ssidHex: ssidHex,
+                    bssid: bssid
+                )
+                _ = try? await self.engine.performPeriodicTick()
+                self.savedMessage = self.localization.savedSuccessMessage
+                await MainActor.run {
+                    SettingsWindowController.shared.close()
+                }
+            } else if let identity = await self.engine.currentResolvedIdentity() {
                 _ = try? await self.engine.createOrUpdateProfile(
                     alias: self.alias.isEmpty ? self.localization.defaultHotspotAlias : self.alias,
                     limitBytes: limitBytes,
@@ -106,14 +166,6 @@ public final class SettingsState: ObservableObject {
                 )
                 _ = try? await self.engine.performPeriodicTick()
                 self.savedMessage = self.localization.savedSuccessMessage
-                await MainActor.run {
-                    SettingsWindowController.shared.close()
-                }
-            } else if let profileID = await self.engine.currentSnapshot().selectedProfileID {
-                _ = try? await self.engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
-                _ = try? await self.engine.changeResetDay(profileID: profileID, newResetDay: day)
-                _ = try? await self.engine.performPeriodicTick()
-                self.savedMessage = self.localization.savedLimitAndResetDayMessage
                 await MainActor.run {
                     SettingsWindowController.shared.close()
                 }
@@ -405,16 +457,28 @@ public final class SettingsWindowController {
     public private(set) var window: NSWindow?
     private var state: SettingsState?
 
-    public func show(engine: RuntimeEngine, localization: Localization = Localization()) {
+    public func show(
+        engine: RuntimeEngine,
+        localization: Localization = Localization(),
+        registeringProfile: Bool = false
+    ) {
         if let window {
             updateLocalization(localization)
-            state?.refreshFromEngine()
+            if registeringProfile {
+                state?.prepareForProfileRegistration()
+            } else {
+                state?.prepareForProfileEditing()
+            }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let state = SettingsState(engine: engine, localization: localization)
+        let state = SettingsState(
+            engine: engine,
+            localization: localization,
+            registeringProfile: registeringProfile
+        )
         self.state = state
         let hostingController = NSHostingController(rootView: SettingsView(state: state))
         let win = NSWindow(contentViewController: hostingController)

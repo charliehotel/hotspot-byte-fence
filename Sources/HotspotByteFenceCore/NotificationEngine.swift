@@ -30,6 +30,17 @@ public struct NotificationEvaluator: Sendable {
     public static let mute10MinutesSeconds: TimeInterval = 600
     public static let mute1HourSeconds: TimeInterval = 3600
 
+    public static func shouldNotifyLimitReached(
+        isPauseBlockingActive: Bool,
+        protectionState: ProtectionState,
+        usagePercent: Double,
+        lastNotifiedPercent: Double
+    ) -> Bool {
+        !isPauseBlockingActive &&
+        (protectionState == .limitReached || usagePercent >= 100) &&
+        lastNotifiedPercent < 100
+    }
+
     public static func evaluateLimitReached(
         record: ProfileNotificationRecord,
         currentCycleDate: String

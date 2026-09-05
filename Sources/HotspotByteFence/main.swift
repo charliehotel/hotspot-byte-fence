@@ -125,6 +125,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(resetItem)
         }
 
+        let profilesMenu = NSMenu()
+        profilesMenu.autoenablesItems = false
+        let registerProfileItem = NSMenuItem(
+            title: localization.menuRegisterProfileTitle,
+            action: #selector(registerProfileMenuItem),
+            keyEquivalent: ""
+        )
+        registerProfileItem.target = self
+        registerProfileItem.setAccessibilityIdentifier("Command.RegisterProfile")
+        profilesMenu.addItem(registerProfileItem)
+        profilesMenu.addItem(NSMenuItem.separator())
+
+        let profiles = store?.profiles ?? []
+        if profiles.isEmpty {
+            let emptyProfilesItem = NSMenuItem(
+                title: localization.menuNoProfilesRegistered,
+                action: nil,
+                keyEquivalent: ""
+            )
+            emptyProfilesItem.isEnabled = false
+            profilesMenu.addItem(emptyProfilesItem)
+        } else {
+            let activeProfileID = snapshot?.selectedProfileID ?? snapshot?.connectedProfileID
+            for profile in profiles {
+                let profileItem = NSMenuItem(
+                    title: profile.aliasNFC,
+                    action: #selector(selectProfileMenuItem(_:)),
+                    keyEquivalent: ""
+                )
+                profileItem.target = self
+                profileItem.representedObject = profile.profileID
+                profileItem.state = profile.profileID == activeProfileID ? .on : .off
+                profileItem.setAccessibilityIdentifier("Menu.Profile.\(profile.profileID.uuidString)")
+                profilesMenu.addItem(profileItem)
+            }
+
+            profilesMenu.addItem(NSMenuItem.separator())
+            let selectedProfile = activeProfileID.flatMap { profileID in
+                profiles.first(where: { $0.profileID == profileID })
+            }
+            let editProfileItem = NSMenuItem(
+                title: selectedProfile.map { localization.formatEditProfile(alias: $0.aliasNFC) }
+                    ?? localization.menuEditProfileTitle,
+                action: #selector(editProfileMenuItem(_:)),
+                keyEquivalent: ""
+            )
+            editProfileItem.target = self
+            editProfileItem.representedObject = activeProfileID
+            editProfileItem.isEnabled = activeProfileID != nil
+            editProfileItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+            editProfileItem.setAccessibilityIdentifier("Command.EditProfile")
+            profilesMenu.addItem(editProfileItem)
+        }
+
+        let profilesParentItem = NSMenuItem(
+            title: localization.menuProfilesTitle,
+            action: nil,
+            keyEquivalent: ""
+        )
+        profilesParentItem.submenu = profilesMenu
+        profilesParentItem.image = NSImage(systemSymbolName: "person.2", accessibilityDescription: nil)
+        profilesParentItem.setAccessibilityIdentifier("Command.Profiles")
+        menu.addItem(profilesParentItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let limitMenu = NSMenu()
@@ -349,6 +413,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let isPaused = await engine.currentSnapshot().isPauseBlockingActive
                 _ = try? await engine.pauseBlockingToggled(profileID: profileID, isPaused: !isPaused)
             }
+        }
+    }
+
+    @objc private func selectProfileMenuItem(_ sender: NSMenuItem) {
+        guard let engine, let profileID = sender.representedObject as? UUID else { return }
+        Task {
+            _ = try? await engine.selectProfile(id: profileID)
+        }
+    }
+
+    @objc private func registerProfileMenuItem() {
+        guard let engine else { return }
+        SettingsWindowController.shared.show(
+            engine: engine,
+            localization: localization,
+            registeringProfile: true
+        )
+    }
+
+    @objc private func editProfileMenuItem(_ sender: NSMenuItem) {
+        guard let engine, let profileID = sender.representedObject as? UUID else { return }
+        Task {
+            _ = try? await engine.selectProfile(id: profileID)
+            openSettingsWindow()
         }
     }
 
@@ -663,7 +751,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cycleDate = profile.cycle.cycleID.effectiveDate
         let notifRecord = store.notificationState.profileNotificationStates[profileID] ?? (try? ProfileNotificationRecord()) ?? (try! ProfileNotificationRecord())
 
-        if (snapshot.protectionState == .limitReached || percent >= 100) && lastNotifiedPercent < 100 {
+        if NotificationEvaluator.shouldNotifyLimitReached(
+            isPauseBlockingActive: snapshot.isPauseBlockingActive,
+            protectionState: snapshot.protectionState,
+            usagePercent: percent,
+            lastNotifiedPercent: lastNotifiedPercent
+        ) {
             lastNotifiedPercent = 100
             if case .deliver = (try? NotificationEvaluator.evaluateLimitReached(
                 record: notifRecord, currentCycleDate: cycleDate

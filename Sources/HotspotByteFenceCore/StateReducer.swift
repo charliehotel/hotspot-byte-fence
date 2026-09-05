@@ -338,13 +338,18 @@ public enum StateReducer {
                     let newProfiles = newState.store.profiles.map { $0.profileID == existing.profileID ? updatedProfile : $0 }
                     if let updatedStore = try? newState.store.updatingStore(now: now, selectedProfileID: existing.profileID, profiles: newProfiles) {
                         newState.store = updatedStore
-                        if let resolved = newState.resolvedIdentity, resolved.interfaceName == interfaceName && resolved.ssid.hex == ssidHex {
-                            newState.resolvedProfileID = existing.profileID
-                            newState.connectionState = .monitoring
-                        }
-                        effects.append(.persistStore(updatedStore))
+                    if let resolved = newState.resolvedIdentity, resolved.interfaceName == interfaceName && resolved.ssid.hex == ssidHex {
+                        newState.resolvedProfileID = existing.profileID
+                        newState.connectionState = .monitoring
+                    }
+                    effects.append(.persistStore(updatedStore))
+                    if reached && !updatedProfile.protection.pauseBlocking,
+                       newState.resolvedProfileID == existing.profileID,
+                       let interfaceName = updatedProfile.interfaceName {
+                        effects.append(.disassociate(interfaceName: interfaceName))
                     }
                 }
+            }
             } else {
                 let newProfileID = UUID()
                 if let boundary = try? CycleCalculator.boundary(for: now, resetDay: Int(resetDay), timeZone: .current),

@@ -14,6 +14,11 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(korean.resetAction, "초기화")
         XCTAssertEqual(korean.menuPauseBlocking, "차단 일시정지")
         XCTAssertEqual(korean.menuResumeBlocking, "차단 재개")
+        XCTAssertEqual(korean.menuProfilesTitle, "프로필")
+        XCTAssertEqual(korean.menuRegisterProfileTitle, "프로필 등록...")
+        XCTAssertEqual(korean.menuNoProfilesRegistered, "(등록된 프로필 없음)")
+        XCTAssertEqual(korean.formatEditProfile(alias: "핫스팟"), "'핫스팟' 편집...")
+        XCTAssertEqual(korean.menuEditProfileTitle, "프로필 편집...")
 
         let english = Localization(language: .english)
         XCTAssertEqual(english.effectiveLanguage, .english)
@@ -25,6 +30,11 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(english.resetAction, "Reset")
         XCTAssertEqual(english.menuPauseBlocking, "Pause Blocking")
         XCTAssertEqual(english.menuResumeBlocking, "Resume Blocking")
+        XCTAssertEqual(english.menuProfilesTitle, "Profiles")
+        XCTAssertEqual(english.menuRegisterProfileTitle, "Register Profile...")
+        XCTAssertEqual(english.menuNoProfilesRegistered, "(No Registered Profiles)")
+        XCTAssertEqual(english.formatEditProfile(alias: "Hotspot"), "Edit 'Hotspot'...")
+        XCTAssertEqual(english.menuEditProfileTitle, "Edit Profile...")
     }
 
     func testLocalizationNotificationStrings() {
@@ -73,6 +83,21 @@ final class LocalizationAndNotificationTests: XCTestCase {
             return
         }
         XCTAssertEqual(updatedNewCycle.successNotifiedCycleDate, "2026-10-01")
+    }
+
+    func testLimitNotificationIsSuppressedWhileBlockingPaused() {
+        XCTAssertFalse(NotificationEvaluator.shouldNotifyLimitReached(
+            isPauseBlockingActive: true,
+            protectionState: .limitReached,
+            usagePercent: 100,
+            lastNotifiedPercent: 0
+        ))
+        XCTAssertTrue(NotificationEvaluator.shouldNotifyLimitReached(
+            isPauseBlockingActive: false,
+            protectionState: .limitReached,
+            usagePercent: 100,
+            lastNotifiedPercent: 0
+        ))
     }
 
     func testNotificationEvaluatorBlockingFailedMutesAndThrottling() throws {
