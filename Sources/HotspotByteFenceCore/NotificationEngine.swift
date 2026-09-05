@@ -6,6 +6,7 @@ import UserNotifications
 public enum NotificationCategory: String, Sendable {
     case limitReached
     case blockingFailed
+    case warningThreshold
 }
 
 public enum NotificationSuppressionReason: String, Equatable, Sendable {
@@ -117,7 +118,25 @@ public struct NotificationEvaluator: Sendable {
         }
     }
 
-    public static func applyMute1Hour(
+    public static func evaluateWarningThreshold(
+        record: ProfileNotificationRecord,
+        currentCycleDate: String
+    ) throws -> NotificationEvaluationOutcome {
+        let key = "warn90-" + currentCycleDate
+        if record.successNotifiedCycleDate == key {
+            return .suppressed(reason: .alreadyNotifiedInCycle)
+        }
+        let updated = try ProfileNotificationRecord(
+            successNotifiedCycleDate: key,
+            failureMute: record.failureMute,
+            muteExpiresAt: record.muteExpiresAt,
+            muteCycleDate: record.muteCycleDate,
+            lastFailureNotificationAt: record.lastFailureNotificationAt
+        )
+        return .deliver(updatedRecord: updated)
+    }
+
+        public static func applyMute1Hour(
         record: ProfileNotificationRecord,
         now: Date
     ) throws -> ProfileNotificationRecord {

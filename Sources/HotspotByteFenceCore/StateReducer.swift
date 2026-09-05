@@ -264,6 +264,11 @@ public enum StateReducer {
             ) {
                 newState.store = updatedStore
                 effects.append(.persistStore(updatedStore))
+                if let profile = updatedStore.profiles.first(where: { $0.profileID == profileID }),
+                   let interfaceName = profile.interfaceName,
+                   !profile.protection.pauseBlocking {
+                    effects.append(.disassociate(interfaceName: interfaceName))
+                }
             }
 
         case let .pauseBlockingToggled(profileID, isPaused):
@@ -412,21 +417,25 @@ public enum StateReducer {
                 let reached = newUsage.rawValue >= profile.limitBytes.rawValue
                 let shouldFlushImmediately = (persistence == .requiredAndImmediate || reached)
                 let bytesSinceLastFlush = shouldFlushImmediately ? ByteCount(0) : accumulator.state.bytesSinceLastFlush
-                if let updatedStore = try? updateProfileUsageAndLimit(
-                    store: newState.store,
-                    profileID: profile.profileID,
-                    newUsageBytes: newUsage,
-                    limitReached: reached,
-                    sample: sample,
-                    bytesSinceLastFlush: bytesSinceLastFlush
-                ) {
-                    newState.store = updatedStore
-                    if shouldFlushImmediately {
-                        accumulator.markDurablyFlushed()
-                        newState.measurementStates[profile.profileID] = accumulator.state
-                        effects.append(.persistStore(updatedStore))
+               if let updatedStore = try? updateProfileUsageAndLimit(
+                   store: newState.store,
+                   profileID: profile.profileID,
+                   newUsageBytes: newUsage,
+                   limitReached: reached,
+                   sample: sample,
+                   bytesSinceLastFlush: bytesSinceLastFlush
+               ) {
+                   newState.store = updatedStore
+                   if shouldFlushImmediately {
+                       accumulator.markDurablyFlushed()
+                       newState.measurementStates[profile.profileID] = accumulator.state
+                       effects.append(.persistStore(updatedStore))
+                   }
+                    if reached && !profile.protection.limitReached && !profile.protection.pauseBlocking,
+                       let interfaceName = profile.interfaceName {
+                        effects.append(.disassociate(interfaceName: interfaceName))
                     }
-                }
+               }
             case .recoveryRequired:
                 if let updatedStore = try? updateGlobalSafety(
                     store: newState.store,
@@ -666,7 +675,28 @@ public enum StateReducer {
                 lastPersistedUsageAt: Date(),
                 bytesSinceLastFlush: bytesSinceLastFlush
            )
-            let newProtection = try profile.protection.updating(limitReached: limitReached)
+             let eligibility = ProtectionEligibilityEvaluator.evaluate(ProtectionEligibilityInput(
+                 globalSafety: store.globalState.safetyState,
+                 compiledMode: BuildConfiguration.compiledMode,
+                 identityCapability: store.globalState.identityCapability == .pending ? .passed : store.globalState.identityCapability,
+                 counterCapability: store.globalState.counterCapability == .pending ? .passed : store.globalState.counterCapability,
+                 sharedInterfaceSSID: profile.sharesInterfaceSSID,
+                 authorizationAvailable: true,
+                 exactTargetResolved: true,
+                 pauseBlocking: profile.protection.pauseBlocking
+             ))
+             let newCapability: BlockingCapabilityV1 = switch eligibility {
+                 case .strongBlockingReady: .strongReady
+                 case .blockingNotGuaranteed(.measurementOnlyBuild): .measurementOnly
+                 case .blockingNotGuaranteed(.sharedInterfaceSSID): .sharedInterfaceSSID
+                 case .blockingNotGuaranteed(.authorizationUnavailable): .authorizationUnavailable
+                 case .blockingNotGuaranteed: .notGuaranteed
+                 case .recoveryRequired: .notGuaranteed
+             }
+             let newProtection = try profile.protection.updating(
+                 limitReached: limitReached,
+                 blockingCapability: newCapability
+             )
             return try profile.updating(
                measurement: newMeasurement,
                 protection: newProtection

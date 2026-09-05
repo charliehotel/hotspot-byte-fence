@@ -1,83 +1,248 @@
+![Hotspot Byte Fence](assets/HotspotByteFence_README_Hero.png)
+
 # Hotspot Byte Fence
 
-Hotspot Byte Fence (HBF)은 macOS 메뉴 막대용 데이터 사용량 측정 및 Wi-Fi 보호 도구입니다.
+**핫스팟 데이터를 지키는 작은 파수꾼.**
 
-[GitHub Releases](https://github.com/charliehotel/hotspot-byte-fence/releases)
+iPhone이나 iPad 핫스팟에 연결해 MacBook을 쓸 때, 데이터를 얼마나 쓰고 있는지 메뉴 막대에서 바로 확인할 수 있습니다. 목표 사용량을 설정하면 50%, 80%, 90% 단계마다 색상으로 경고하고, 한도에 도달하면 자동으로 Wi-Fi를 차단해 요금 폭탄을 막아줍니다.
 
-현재 v1 배포 기준은 다음과 같습니다.
+> **현재 상태:** v1 개발 중. GitHub Releases에 게시된 빌드는 아직 정식 서명이나 notarization 없이 배포되는 unsigned 빌드입니다. 배포 전 실제 Mac 검증 게이트가 완료되지 않은 기능(strong-blocking 등)은 사용 가능 여부가 게이트 보고서 기준으로만 확정됩니다.
 
-- GitHub Release에는 Developer ID 서명이나 notarization이 없는 unsigned ZIP을 게시합니다.
-- 지원되는 사용자 설치 절차에서는 압축을 푼 `.app`에 사용자가 자신의 Mac에서 ad hoc 서명을 해야 합니다.
-- ad hoc 서명은 Developer ID 서명이나 notarization을 대신하지 않습니다.
-- v1의 호환성 검증 대상은 `macOS 13.0 이상 / arm64`이며, 실제 지원 OS는 게이트 보고서의 exact macOS build 행으로만 확정합니다.
-- 지원 OS와 strong-blocking 여부는 GitHub Release 페이지와 게이트 보고서에 명시된 범위만 따릅니다. Intel `x86_64`는 별도 검증 전까지 v1 범위에 포함하지 않습니다.
-- 아직 승인되지 않은 GitHub validation candidate는 `OperatorValidation`으로만 실행하며 보호 사용자용 strong-blocking 상태를 표시하지 않습니다.
+---
 
-## 설치
+## 목차
 
-### 1. ZIP 무결성 확인
+- [주요 기능](#주요-기능)
+- [사람이 직접 설치하는 경우](#사람이-직접-설치하는-경우)
+- [AI가 대신 설치하는 경우](#ai가-대신-설치하는-경우)
+- [첫 실행과 위치 서비스 권한](#첫-실행과-위치-서비스-권한)
+- [프로필 설정](#프로필-설정)
+- [목표 사용량 설정](#목표-사용량-설정)
+- [갱신일(초기화 기준일)](#갱신일초기화-기준일)
+- [사용량 초기화 버튼](#사용량-초기화-버튼)
+- [메뉴 막대 상태 아이콘](#메뉴-막대-상태-아이콘)
+- [측정 범위와 주의 사항](#측정-범위와-주의-사항)
 
-서명이나 실행 전에 GitHub Release에서 받은 ZIP의 SHA-256을 확인합니다.
+---
+
+## 주요 기능
+
+- 메뉴 막대에서 실시간으로 데이터 사용량(GB)을 표시합니다.
+- 사용량이 50%, 80%, 90%, 100%에 도달할 때 아이콘 색상과 알림으로 단계별 경고를 보냅니다.
+- 설정한 한도에 도달하면 해당 핫스팟 Wi-Fi를 자동으로 차단합니다(strong-blocking, 게이트 통과 빌드 한정).
+- 갱신일 기준으로 사용량 주기를 자동 관리합니다.
+- 한국어/영어 자동 전환을 지원합니다.
+- 로그인 시 자동 실행을 지원합니다.
+
+---
+
+## 사람이 직접 설치하는 경우
+
+### 1단계: ZIP 다운로드
+
+[GitHub Releases](https://github.com/charliehotel/hotspot-byte-fence/releases) 페이지에서 최신 버전의 `HotspotByteFence-VERSION.zip`을 다운로드합니다.
+
+### 2단계: 무결성 확인
+
+압축을 풀기 전에 다운로드한 ZIP의 SHA-256을 확인합니다. 같은 릴리스 페이지에 게시된 `SHA-256SUMS` 값과 일치해야 합니다.
 
 ```sh
 shasum -a 256 HotspotByteFence-VERSION.zip
 ```
 
-결과가 같은 Release에 게시된 `SHA-256SUMS`와 일치하는지 확인합니다. 일치하지 않으면 앱을 실행하거나 서명하지 말고 해당 Release를 사용하지 않습니다.
+값이 다르면 파일이 손상되었거나 다른 파일일 수 있습니다. 실행하지 말고 재다운로드하세요.
 
-### 2. 앱 압축 해제
+### 3단계: 압축 해제 및 이동
 
-ZIP을 압축 해제한 뒤 앱을 원하는 위치에 둡니다. 아래 예시는 `/Applications`에 설치한 경우입니다.
+ZIP을 해제한 뒤 `.app`을 원하는 위치에 놓습니다. 아래 예시는 `/Applications`에 설치하는 경우입니다.
 
 ```sh
+unzip HotspotByteFence-VERSION.zip
+mv HotspotByteFence.app /Applications/
+```
+
+### 4단계: 로컬 ad hoc 서명
+
+GitHub 배포본은 Developer ID 서명이나 notarization이 없는 unsigned 빌드입니다. macOS에서 실행하려면 자신의 Mac에서 ad hoc 서명을 직접 적용해야 합니다.
+
+```sh
+codesign --force --sign - /Applications/HotspotByteFence.app
+```
+
+`-`는 Developer ID 없이 현재 Mac에만 유효한 ad hoc 서명입니다. 다른 Mac에서 실행할 때는 해당 Mac에서 동일한 절차를 반복해야 합니다.
+
+### 5단계: 서명 확인
+
+```sh
+codesign --verify --deep --strict --verbose=2 /Applications/HotspotByteFence.app
+```
+
+`valid on disk`와 `satisfies its Designated Requirement`가 출력되면 정상입니다. 오류가 출력되면 앱을 열지 말고 서명 절차를 다시 확인하세요.
+
+### 6단계: 앱 실행
+
+Finder에서 `HotspotByteFence.app`을 더블 클릭하거나, 터미널에서 실행합니다.
+
+```sh
+open /Applications/HotspotByteFence.app
+```
+
+처음 실행하면 macOS가 "확인되지 않은 개발자" 경고를 표시할 수 있습니다. 시스템 설정 > 개인 정보 보호 및 보안에서 해당 앱을 허용하면 됩니다.
+
+---
+
+## AI가 대신 설치하는 경우
+
+> 이 섹션은 Codex, Claude, Cursor 등 AI 에이전트가 사용자를 대신해 설치할 때 참고하는 가이드입니다.
+
+### 전제 조건 확인
+
+- macOS 13.0 이상, arm64 아키텍처 (Intel x86_64는 v1 검증 범위 외)
+- 네트워크 접근 가능 (GitHub Releases 다운로드)
+- `codesign`, `shasum`, `unzip` 명령 사용 가능 (macOS 기본 제공)
+- 설치 대상 디렉터리 쓰기 권한 (예: `/Applications` 또는 `~/Applications`)
+
+### 설치 절차
+
+```sh
+#!/bin/sh
+set -euo pipefail
+
+# 설치할 버전 — Releases 페이지에서 확인하세요
+VERSION="0.1.0"
+ZIP="HotspotByteFence-0.1.0.zip"
+URL="https://github.com/charliehotel/hotspot-byte-fence/releases/download/v0.1.0/HotspotByteFence-0.1.0.zip"
 APP="/Applications/HotspotByteFence.app"
-```
 
-### 3. 로컬 ad hoc 서명
+curl -L --fail -o "$ZIP" "$URL"
 
-압축을 푼 앱에 ad hoc 서명을 적용합니다. `-`는 signing identity를 사용하지 않는 ad hoc 서명을 뜻합니다.
+# SHA-256 무결성 확인 — Releases 페이지의 SHA-256SUMS 값으로 교체
+# EXPECTED="abc123..."
+# echo "$EXPECTED  $ZIP" | shasum -a 256 --check
 
-```sh
+unzip -o "$ZIP"
+rm -rf "$APP"
+mv HotspotByteFence.app /Applications/
 codesign --force --sign - "$APP"
-```
-
-릴리스에 중첩된 실행 코드가 포함되어 릴리스 페이지가 별도의 서명 순서를 안내하면 그 안내를 우선합니다. Apple은 복잡한 bundle을 서명할 때 무조건 `--deep`를 사용하는 방식을 권장하지 않습니다.
-
-### 4. 서명 확인
-
-```sh
 codesign --verify --deep --strict --verbose=2 "$APP"
+echo "설치 완료: $APP"
 ```
 
-검증이 실패하면 앱을 실행하지 말고, 해당 Release의 서명 절차와 앱 경로를 다시 확인합니다.
+### 주의 사항 (AI 에이전트용)
 
-### 5. 첫 실행과 로그인 항목
+- `--deep` 옵션은 서명 검증(`--verify`)에만 사용합니다. 서명 적용(`codesign --sign`) 시에는 Apple이 `--deep`를 권장하지 않습니다.
+- SHA-256 확인 단계를 반드시 포함해야 합니다. 값이 일치하지 않으면 설치를 중단하고 사용자에게 보고합니다.
+- `/Applications`에 쓰기 권한이 없으면 `~/Applications`를 대신 사용할 수 있습니다. 권한 없이 `sudo`를 임의로 실행하지 않습니다.
+- ad hoc 서명은 서명한 Mac에서만 유효합니다. 다른 기기에 복사하면 재서명이 필요합니다.
+- 첫 실행은 사용자가 직접 해야 합니다. 위치 서비스 권한과 알림 권한은 대화형 승인이 필요하므로 자동화로 처리할 수 없습니다.
+- `open` 명령으로 앱을 강제 실행하지 않습니다. 권한 승인 없이 실행하면 Wi-Fi 감지 기능이 동작하지 않습니다.
 
-Finder에서 앱을 열고 macOS가 표시하는 첫 실행 및 로그인 항목 승인 안내를 따릅니다. ad hoc 서명은 Developer ID 신뢰나 notarization을 제공하지 않으므로, macOS가 추가 승인을 요구할 수 있습니다.
+---
 
-`SMAppService` 로그인 실행은 앱이 서명되고 사용자가 승인한 뒤에만 사용할 수 있습니다. 서명 또는 승인이 되지 않으면 앱은 로그인 시 자동으로 시작되지 않을 수 있으며, 앱이 실행 중인 동안에만 측정 또는 보호 상태를 유지할 수 있습니다.
+## 첫 실행과 위치 서비스 권한
+
+앱을 처음 실행하면 두 가지 권한 요청이 순서대로 나타납니다.
+
+**위치 서비스 권한:** 현재 연결된 Wi-Fi의 SSID와 BSSID를 읽으려면 macOS의 위치 서비스 접근 권한이 필요합니다. 권한을 거부하면 어떤 핫스팟에도 연결 중인지 확인할 수 없어서 사용량 측정이 시작되지 않습니다. 시스템 설정 > 개인 정보 보호 및 보안 > 위치 서비스에서 Hotspot Byte Fence를 허용해 주세요.
+
+**알림 권한:** 사용량 경고와 차단 알림을 받으려면 알림 권한도 허용해야 합니다. 선택 사항이지만 허용을 권장합니다.
+
+권한 설정 후 앱이 핫스팟 Wi-Fi를 자동으로 감지하면 메뉴 막대 아이콘에 현재 사용량이 표시되기 시작합니다.
+
+---
+
+## 프로필 설정
+
+Hotspot Byte Fence는 핫스팟 네트워크를 "프로필"로 관리합니다. 프로필 하나가 하나의 핫스팟 Wi-Fi 네트워크에 대응합니다.
+
+메뉴 막대 아이콘을 클릭하면 나타나는 메뉴에서 **설정**을 선택해 설정 창을 엽니다.
+
+**프로필 탭**에서 다음을 설정합니다.
+
+- **별칭(이름):** 이 프로필을 구분할 이름입니다. 기본값은 Wi-Fi SSID 이름이지만 원하는 대로 바꿀 수 있습니다. 예: "엄마 핫스팟", "iPhone 15 Pro"
+- **연결 대상 네트워크:** 현재 연결 중인 Wi-Fi 정보(SSID, BSSID, 인터페이스)가 자동으로 표시됩니다. 핫스팟 Wi-Fi에 연결된 상태에서 설정을 열면 해당 네트워크가 자동으로 프로필 후보로 인식됩니다.
+
+프로필을 저장하면 이후 같은 SSID와 BSSID로 연결될 때 자동으로 이 프로필이 활성화되고 사용량 측정이 시작됩니다.
+
+---
+
+## 목표 사용량 설정
+
+프로필 탭의 **목표 사용량** 항목에서 이번 주기의 데이터 한도를 GB 단위로 설정합니다.
+
+슬라이더를 드래그하거나 숫자를 직접 입력할 수 있습니다. 한도를 설정하지 않으려면 **무제한(∞)**을 선택합니다.
+
+한도를 설정하면 사용량이 아래 구간에 도달할 때마다 메뉴 막대 아이콘 색상이 바뀌고 알림이 전송됩니다.
+
+| 사용량 | 아이콘 상태 | 설명 |
+|---|---|---|
+| 50% 미만 | 정상 (회색) | 문제없음 |
+| 50% 이상 | 주의 (노란색) | 절반을 넘었습니다 |
+| 80% 이상 | 경고 (주황색) | 여유가 얼마 남지 않았습니다 |
+| 90% 이상 | 임계 (빨간색) | 한도에 거의 도달했습니다 |
+| 100% 도달 | 차단됨 (빨간 잠금) | 한도 초과, 자동 차단 적용 |
+
+한도에 도달하면 해당 핫스팟 Wi-Fi를 자동으로 끊고 자동 재연결을 막아 추가 사용을 차단합니다. 이 기능(strong-blocking)은 게이트 검증이 완료된 빌드에서만 동작합니다. 검증 전 빌드에서는 알림만 발송되고 자동 차단은 적용되지 않으며, 메뉴에 "차단 보장 불가" 상태가 표시됩니다.
+
+---
+
+## 갱신일(초기화 기준일)
+
+**갱신일**은 매월 데이터 사용량 측정 주기가 시작되는 날짜입니다. 통신사 요금제의 데이터 갱신일과 맞춰 설정하면 실제 요금 주기와 측정 주기를 일치시킬 수 있습니다.
+
+예를 들어 매월 15일에 데이터가 갱신되는 요금제를 쓴다면 갱신일을 15로 설정합니다. 앱은 매월 15일 0시(현지 시각)를 기준으로 새로운 측정 주기를 시작하고 사용량을 0에서 다시 집계합니다.
+
+- 설정 가능 범위: 1 ~ 31일
+- 해당 월에 31일이 없으면 자동으로 그 월의 마지막 날로 조정됩니다. 예: 갱신일 31, 2월이면 28일(또는 29일)로 처리됩니다.
+- 갱신일을 변경하면 다음 주기부터 적용됩니다. 현재 진행 중인 주기의 사용량은 유지됩니다.
+
+---
+
+## 사용량 초기화 버튼
+
+메뉴 막대 메뉴 하단에 **사용량 초기화** 버튼이 있습니다. 이 버튼은 앱이 현재 주기에서 측정한 사용량 기록을 0으로 되돌립니다.
+
+**언제 사용하나요?**
+
+- 요금제를 중간에 변경해서 통신사 데이터 갱신일이 바뀌었을 때
+- 핫스팟 기기를 바꿔서 이전 주기 측정값이 의미 없어졌을 때
+- 테스트나 확인 목적으로 사용량을 처음부터 다시 보고 싶을 때
+
+**주의:** 이 버튼은 앱 내부의 측정 기록만 초기화합니다. 통신사에 기록된 실제 셀룰러 데이터 사용량에는 아무 영향을 주지 않습니다. 초기화 전에 확인 대화상자가 표시되므로 실수로 누르는 것을 막아줍니다.
+
+---
+
+## 메뉴 막대 상태 아이콘
+
+앱이 실행 중이면 메뉴 막대 오른쪽에 아이콘과 현재 사용량이 표시됩니다.
+
+- **회색 아이콘:** 핫스팟 미연결 또는 정상 범위(50% 미만)
+- **노란 아이콘:** 사용량 50% 이상(주의)
+- **주황 아이콘:** 사용량 80% 이상(경고)
+- **빨간 아이콘:** 사용량 90% 이상(임계)
+- **빨간 잠금 아이콘:** 한도 도달, 차단 적용됨
+- **대시(—):** 프로필에 등록된 핫스팟에 연결되지 않은 상태
+
+아이콘을 클릭하면 현재 사용량, 한도, 비율, 프로필 이름이 표시되고 설정 진입, 차단 일시정지, 사용량 초기화 등의 메뉴를 사용할 수 있습니다.
+
+---
+
+## 측정 범위와 주의 사항
+
+- 이 앱은 **이 Mac의 Wi-Fi 인터페이스를 통해 송수신된 데이터**만 측정합니다. 같은 핫스팟에 연결된 다른 기기나 핫스팟 기기 자체의 셀룰러 사용량은 포함되지 않습니다.
+- 측정값은 macOS 커널의 인터페이스 카운터 기준이며, 통신사 청구 금액의 기준이 되는 수치와 다를 수 있습니다.
+- 앱이 종료된 상태이거나 Mac이 절전 중일 때의 사용량은 복구되지 않습니다.
+- 샘플링 주기 특성상 한도에 정확히 도달하는 순간을 포착하지 못할 수 있으며, 한도를 소폭 초과한 뒤에 차단이 실행될 수 있습니다.
+- VPN을 사용하는 경우 대상 Wi-Fi를 통해 실제로 전송된 암호화 트래픽이 한 번 포함되며, VPN 가상 인터페이스의 사용량을 별도로 더하지 않습니다.
+
+---
 
 ## 해시와 검증 범위
 
-Release의 SHA-256은 서명 전 unsigned ZIP을 확인하는 값입니다. 로컬 ad hoc 서명 뒤에는 앱 bundle과 실행 파일의 서명 상태 및 digest가 달라질 수 있으므로, 서명 후 값을 Release의 원본 asset SHA-256과 비교하지 않습니다. 게이트 보고서는 서명 후 `.app` 전체를 `hbf-app-bundle-v1-sha256` 규칙으로 계산한 app-bundle digest와 실행 파일 digest를 별도로 기록합니다.
+릴리스의 SHA-256은 서명 전 unsigned ZIP을 확인하는 값입니다. 로컬 ad hoc 서명을 적용한 뒤에는 앱 번들의 서명 상태가 달라지므로, 서명 후 값을 릴리스의 원본 SHA-256과 비교하지 않습니다. 게이트 보고서는 서명 후 `.app` 번들을 별도 기준으로 계산합니다.
 
-사용자가 로컬에서 서명한 앱은 원본 GitHub asset에서 파생된 artifact입니다. 해당 앱이 strong-blocking 또는 measurement-capable release 검증을 통과했다고 주장하려면, 같은 서명 절차와 같은 post-signing app-bundle 및 executable digest를 사용한 게이트 보고서가 별도로 있어야 합니다.
+---
 
-## 현재 안전성 고지
+## 라이선스 및 면책
 
-문서와 SDK의 API 확인만으로는 실제 Wi-Fi 차단, 자동 재연결 억제, preference 복원, 권한 동작, 또는 장시간 counter 연속성이 입증되지 않습니다. 관련 게이트가 통과되기 전에는 strong-blocking을 보장하지 않습니다.
-
-자세한 요구사항과 검증 기준은 [PRD](docs/HotspotByteFence_PRD.md), [기술설계](docs/HotspotByteFence_TechnicalDesign.md), [capability gates](docs/HotspotByteFence_CapabilityGates.md), [검증 추적표](docs/HotspotByteFence_VerificationTraceability.md)를 확인합니다.
-
-## 현재 개발 상태
-
-현재 저장소에는 SwiftPM 기반의 안전한 core 단계가 구현되어 있습니다. 다음 명령으로 domain, measurement, parser, persistence, installation-marker/tombstone 교차 파일 전환, configuration archive, preference transaction, profile, 관측 아티팩트, 커맨드 결과 원장, 알림 상태, 이벤트 로그 및 상호 참조 불변식이 검증되는 `StoreEnvelopeV1` record 테스트를 실행할 수 있습니다. canonical digest 자체 바인딩, CoreWLAN 라이브 SDK 읽기/복원 연동 및 릴리스 후보 게이트는 후속 단계에서 다룹니다.
-
-```sh
-swift test
-swift run HotspotByteFence
-swift run HotspotByteFence --probe-counter en0
-swift run HotspotByteFence --probe-identity
-```
-
-개발 빌드의 immutable `BuildManifestV1.compiledMode`는 `measurementOnly`입니다. `--probe-counter`와 `--probe-identity`는 read-only 진단 경로이며 Wi-Fi 설정 변경, disconnect, 자동 재연결 억제를 수행하지 않습니다. CoreWLAN identity 값이 현재 권한 또는 연결 상태에서 제공되지 않으면 측정 대상 identity를 추정하지 않고 unavailable 상태로 남깁니다. 강제 차단·preference 변경·실기기 후보 검증은 문서의 F/R 절차를 완료한 뒤 별도 단계에서 구현합니다.
+이 소프트웨어는 사용자가 직접 핫스팟 데이터 사용량을 파악하도록 돕는 보조 도구입니다. 측정값의 정확성이나 자동 차단의 동작 여부에 대한 법적 보증을 제공하지 않습니다. 통신사 요금 한도는 반드시 통신사 앱 또는 계정 페이지에서 직접 확인하세요.

@@ -15,6 +15,9 @@ import CoreLocation
 
 #if canImport(AppKit)
 import AppKit
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -22,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine: RuntimeEngine?
     private var localization = Localization()
     private let loginController: LoginItemControlling = DarwinLoginItemController()
+    private let notificationDelivery: NotificationDeliverySource = DarwinNotificationDelivery()
+    private var lastNotifiedPercent: Double = 0
 #if canImport(CoreLocation)
     private var locationManager: CLLocationManager?
 #endif
@@ -32,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupLocationManager()
 #endif
         startEngine()
+#if canImport(UserNotifications)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+#endif
     }
 
     private func setupStatusItem() {
@@ -295,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func makeMenuBarImage(baseName: String) -> NSImage? {
+    private func makeMenuBarImage(baseName: String, isTemplate: Bool = true) -> NSImage? {
         let rep1xURL = Bundle.main.url(forResource: "\(baseName)-18", withExtension: "png")
             ?? Bundle.main.url(forResource: "\(baseName)-18", withExtension: "png", subdirectory: "MenuBar")
             ?? URL(fileURLWithPath: "assets/MenuBar/\(baseName)-18.png")
@@ -312,24 +320,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rep2.size = NSSize(width: 18, height: 18)
             result.addRepresentation(rep2)
         }
-        result.isTemplate = true
+        result.isTemplate = isTemplate
         return result
     }
 
     private func menuBarImage(for state: MenuBarUsageState, isBlocked: Bool) -> NSImage? {
         let baseName: String
+        let useTemplate: Bool
         if isBlocked || state == .limitReached {
-            baseName = "blocked_template"
+            baseName = "blocked"
+            useTemplate = false
         } else {
             switch state {
-            case .normal: baseName = "normal_template"
-            case .notice: baseName = "notice50_template"
-            case .warning: baseName = "warning80_template"
-            case .critical: baseName = "critical90_template"
-            case .limitReached: baseName = "blocked_template"
+            case .normal: baseName = "normal"; useTemplate = false
+            case .notice: baseName = "notice50"; useTemplate = false
+            case .warning: baseName = "warning80"; useTemplate = false
+            case .critical: baseName = "critical90"; useTemplate = false
+            case .limitReached: baseName = "blocked"; useTemplate = false
             }
         }
-        return makeMenuBarImage(baseName: baseName)
+        return makeMenuBarImage(baseName: baseName, isTemplate: useTemplate)
     }
 
     @objc private func togglePauseBlocking() {
@@ -633,12 +643,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let currentStore = await newEngine.currentStore()
                     self.rebuildMenu(snapshot: snapshot, identity: identity, store: currentStore)
                     SettingsWindowController.shared.updateLocalization(self.localization)
+                    await self.handleUsageNotifications(snapshot: snapshot, store: currentStore, engine: newEngine)
                 }
             }
         } catch {
             fputs("Failed to initialize runtime engine: \(error)\n", stderr)
         }
     }
+
+#if canImport(UserNotifications)
+    private func handleUsageNotifications(
+        snapshot: RuntimeSnapshotV1,
+        store: StoreEnvelopeV1,
+        engine: RuntimeEngine
+    ) async {
+        guard let usage = snapshot.currentUsageBytes,
+              let limit = snapshot.currentLimitBytes,
+              limit.rawValue > 0,
+              let profileID = snapshot.connectedProfileID,
+              let profile = store.profiles.first(where: { $0.profileID == profileID }) else {
+            return
+        }
+        let percent = Double(usage.rawValue) / Double(limit.rawValue) * 100.0
+        let alias = profile.aliasNFC
+        let limitText = UsageFormatter.formatGB(limit)
+        let cycleDate = profile.cycle.cycleID.effectiveDate
+        let notifRecord = store.notificationState.profileNotificationStates[profileID] ?? (try? ProfileNotificationRecord()) ?? (try! ProfileNotificationRecord())
+
+        if snapshot.protectionState == .limitReached && lastNotifiedPercent < 100 {
+            lastNotifiedPercent = 100
+            if case .deliver = (try? NotificationEvaluator.evaluateLimitReached(
+                record: notifRecord, currentCycleDate: cycleDate
+            )) ?? .suppressed(reason: .alreadyNotifiedInCycle) {
+                try? await notificationDelivery.deliver(
+                    title: localization.limitReachedNotificationTitle(profileName: alias),
+                    body: localization.limitReachedNotificationBody(profileName: alias, limitGB: limitText),
+                    category: .limitReached
+                )
+            }
+        } else if percent >= 90 && lastNotifiedPercent < 90 {
+            lastNotifiedPercent = 90
+            if case .deliver = (try? NotificationEvaluator.evaluateWarningThreshold(
+                record: notifRecord, currentCycleDate: cycleDate
+            )) ?? .suppressed(reason: .alreadyNotifiedInCycle) {
+                try? await notificationDelivery.deliver(
+                    title: localization.warningThresholdNotificationTitle(profileName: alias),
+                    body: localization.warningThresholdNotificationBody(profileName: alias, limitGB: limitText),
+                    category: .warningThreshold
+                )
+            }
+        } else if percent < 90 {
+            lastNotifiedPercent = percent
+        }
+    }
+#endif
 }
 
 #if canImport(CoreLocation)

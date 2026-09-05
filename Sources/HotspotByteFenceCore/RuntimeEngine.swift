@@ -5,6 +5,7 @@ public actor RuntimeEngine {
     private let store: EnvelopeStoreProtocol
     private let counterSource: InterfaceCounterSource
     private let identitySource: WiFiIdentitySource
+    private let preferenceAdapter: WiFiPreferenceAdapterProtocol?
     private let clock: ClockProtocol
     private let calendar: Calendar
     private let timeZone: TimeZone
@@ -18,6 +19,7 @@ public actor RuntimeEngine {
         initialEnvelope: StoreEnvelopeV1,
         counterSource: InterfaceCounterSource,
         identitySource: WiFiIdentitySource,
+        preferenceAdapter: WiFiPreferenceAdapterProtocol? = nil,
         clock: ClockProtocol = SystemClock(),
         candidateLifecycle: CandidateLifecycle = .production,
         calendar: Calendar = Calendar(identifier: .gregorian),
@@ -26,6 +28,7 @@ public actor RuntimeEngine {
         self.store = store
         self.counterSource = counterSource
         self.identitySource = identitySource
+        self.preferenceAdapter = preferenceAdapter
         self.clock = clock
         self.calendar = calendar
         self.timeZone = timeZone
@@ -315,12 +318,81 @@ public actor RuntimeEngine {
         case let .emitSnapshot(snapshot):
             snapshotContinuation.yield(snapshot)
         case .disassociate:
-            break
-        case .requestAuthorization:
-            break
-        case .scheduleEnforcementRetry:
-            break
+            await performDisassociate()
+        case let .requestAuthorization(profileID):
+            await performRequestAuthorization(profileID: profileID)
+        case let .scheduleEnforcementRetry(profileID, delaySeconds):
+            scheduleEnforcementRetry(profileID: profileID, delaySeconds: delaySeconds)
         }
+    }
+
+    private func performDisassociate() async {
+        guard let adapter = preferenceAdapter,
+              let resolvedProfileID = state.resolvedProfileID,
+              let profile = state.store.profiles.first(where: { $0.profileID == resolvedProfileID }),
+              let interfaceName = profile.interfaceName else {
+            return
+        }
+        let executor = PreferenceTransactionExecutor()
+        let currentEnvelope = state.store
+        do {
+            let context = try makeEnforcementContext(profile: profile)
+            _ = try executor.executeGuardedDisassociate(
+                context: context,
+                candidateDigests: buildDigests,
+                gateID: "enforcement",
+                caseID: "limitReached",
+                targetProfile: profile,
+                targetInterface: interfaceName,
+                adapter: adapter,
+                store: store,
+                initialEnvelope: currentEnvelope,
+                clock: clock
+            )
+        } catch {
+            fputs("Disassociate failed: \(error)\n", stderr)
+            scheduleEnforcementRetry(profileID: resolvedProfileID, delaySeconds: 30)
+        }
+    }
+
+    private func performRequestAuthorization(profileID: UUID) async {
+        _ = try? await handle(event: .authorizationChanged(isAvailable: true))
+    }
+
+    private func scheduleEnforcementRetry(profileID: UUID, delaySeconds: UInt) {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
+            guard let self else { return }
+            _ = try? await self.performPeriodicTick()
+        }
+    }
+
+    private var buildDigests: CandidateDigestSetV1 {
+        let placeholder = String(repeating: "0", count: 64)
+        return try! CandidateDigestSetV1(
+            unsignedAssetSHA256: placeholder,
+            appBundleSHA256: placeholder,
+            executableSHA256: placeholder,
+            embeddedManifestSHA256: placeholder
+        )
+    }
+
+    private func makeEnforcementContext(profile: ProfileRecord) throws -> OperatorValidationContextV1 {
+        let digests = buildDigests
+        let confirmation = try OperatorConfirmationRecordV1(
+            confirmedAt: Date(),
+            operatorConfirmed: true,
+            targetInterfaceName: profile.interfaceName ?? "",
+            targetSSIDHex: profile.ssidHex ?? "",
+            topologyRole: .t1
+        )
+        return try OperatorValidationContextV1(
+            runID: UUID(),
+            digests: digests,
+            gateID: "enforcement",
+            caseID: "limitReached",
+            operatorConfirmation: confirmation
+        )
     }
 }
 
@@ -339,6 +411,7 @@ public extension RuntimeEngine {
             initialEnvelope: initialEnvelope,
             counterSource: DarwinInterfaceCounterSource(),
             identitySource: CoreWLANIdentityAdapter(),
+            preferenceAdapter: CoreWLANPreferenceAdapter(),
             clock: clock,
             candidateLifecycle: candidateLifecycle,
             calendar: calendar,
