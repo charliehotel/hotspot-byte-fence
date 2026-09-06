@@ -8,6 +8,39 @@ final class StateReducerTests: XCTestCase {
     private let bssid2 = try! BSSID(string: "AA:BB:CC:DD:EE:FF")
     private let ssidHex = "486f7473706f74"
 
+    func testConnectionSelectsRegisteredProfileOnlyWhenConnectionChanges() throws {
+        var state = try makeInitialState()
+        let otherID = UUID()
+        let other = try makeProfile(profileID: otherID, networkSSIDHex: "4f74686572")
+        state.store = try state.store.updatingStore(
+            selectedProfileID: otherID, profiles: state.store.profiles + [other]
+        )
+        let identity = WiFiIdentitySnapshot(
+            interfaceName: "en0", interfaceIndex: 1, linkState: .associated,
+            ssid: try SSID(hex: ssidHex), bssid: bssid1
+        )
+        let (connected, effects) = StateReducer.reduce(state: state, event: .networkResolutionChanged(identity: identity))
+        XCTAssertEqual(connected.store.selectedProfileID, profileID)
+        XCTAssertTrue(effects.contains { if case .persistStore = $0 { return true }; return false })
+
+        let otherIdentity = WiFiIdentitySnapshot(
+            interfaceName: "en0", interfaceIndex: 1, linkState: .associated,
+            ssid: try SSID(hex: "4f74686572"), bssid: bssid1
+        )
+        let (switched, _) = StateReducer.reduce(state: connected, event: .networkResolutionChanged(identity: otherIdentity))
+        XCTAssertEqual(switched.store.selectedProfileID, otherID)
+        XCTAssertEqual(switched.resolvedProfileID, otherID)
+
+        let (selected, _) = StateReducer.reduce(state: connected, event: .selectProfile(profileID: otherID))
+        let (repeated, repeatedEffects) = StateReducer.reduce(state: selected, event: .networkResolutionChanged(identity: identity))
+        XCTAssertEqual(repeated.store.selectedProfileID, otherID)
+        XCTAssertFalse(repeatedEffects.contains { if case .persistStore = $0 { return true }; return false })
+
+        let (disconnected, _) = StateReducer.reduce(state: repeated, event: .networkResolutionChanged(identity: nil))
+        let (reconnected, _) = StateReducer.reduce(state: disconnected, event: .networkResolutionChanged(identity: identity))
+        XCTAssertEqual(reconnected.store.selectedProfileID, profileID)
+    }
+
     func testGlobalSafetyTransitionsAndEffects() throws {
         let state = try makeInitialState()
 
@@ -163,6 +196,7 @@ final class StateReducerTests: XCTestCase {
         )
         XCTAssertEqual(confirmedState.connectionState, ConnectionState.monitoring)
         XCTAssertEqual(confirmedState.resolvedProfileID, profileID)
+        XCTAssertEqual(confirmedState.store.selectedProfileID, profileID)
         let updatedProfile = confirmedState.store.profiles.first { $0.profileID == profileID }
         XCTAssertTrue(updatedProfile?.confirmedBSSIDs.contains(bssid2) == true)
         XCTAssertTrue(confirmedEffects.contains(where: {
@@ -388,11 +422,11 @@ final class StateReducerTests: XCTestCase {
         )
     }
 
-    private func makeProfile(profileID: UUID) throws -> ProfileRecord {
+    private func makeProfile(profileID: UUID, networkSSIDHex: String? = nil) throws -> ProfileRecord {
         try ProfileRecord(
             profileID: profileID,
-            aliasNFC: "My Hotspot",
-            ssidHex: ssidHex,
+            aliasNFC: networkSSIDHex == nil ? "My Hotspot" : "Other Hotspot",
+            ssidHex: networkSSIDHex ?? ssidHex,
             interfaceName: "en0",
             confirmedBSSIDs: [bssid1],
             isComplete: true,

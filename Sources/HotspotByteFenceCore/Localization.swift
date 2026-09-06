@@ -121,6 +121,14 @@ public struct Localization: Sendable {
             : "You have used 90% of your \(limitGB) data limit. The hotspot connection may be blocked soon."
     }
 
+    public func profileActivatedNotificationTitle(profileName: String) -> String {
+        isKorean ? "[\(profileName)] 프로필 자동 변경" : "[\(profileName)] Profile Automatically Changed"
+    }
+
+    public func profileActivatedNotificationBody(profileName: String) -> String {
+        isKorean ? "\"\(profileName)\" 프로필로 자동 변경됐습니다." : "Automatically changed to the \"\(profileName)\" profile."
+    }
+
     public func blockingFailedNotificationTitle(profileName: String) -> String {
         isKorean
             ? "[\(profileName)] 차단 실패 경고"
@@ -262,6 +270,18 @@ public struct Localization: Sendable {
 
     public var menuRegisterProfileTitle: String {
         isKorean ? "프로필 등록..." : "Register Profile..."
+    }
+
+    public func newNetworkProfilePrompt(ssid: String) -> String {
+        isKorean ? "‘\(ssid)’의 프로필을 설정할까요?" : "Set up a profile for ‘\(ssid)’?"
+    }
+
+    public var newNetworkProfileExplanation: String {
+        isKorean ? "등록된 프로필이 없는 Wi-Fi입니다. 사용량 한도와 갱신일을 설정할 수 있습니다." : "This Wi-Fi has no registered profile. You can set a usage limit and monthly reset day."
+    }
+
+    public var profileSetupLaterTitle: String {
+        isKorean ? "나중에" : "Later"
     }
 
     public var menuNoProfilesRegistered: String {

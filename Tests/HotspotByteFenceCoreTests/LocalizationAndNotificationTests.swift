@@ -43,12 +43,53 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(korean.limitReachedNotificationBody(profileName: "MyHotspot", limitGB: "4.50GB"), "목표 사용량(4.50GB)에 도달하여 핫스팟 연결을 차단하였습니다.")
         XCTAssertEqual(korean.blockingFailedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] 차단 실패 경고")
         XCTAssertEqual(korean.blockingFailedNotificationBody(profileName: "MyHotspot", reason: "timeout"), "핫스팟 데이터 차단에 실패했습니다: timeout")
+        XCTAssertEqual(korean.profileActivatedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] 프로필 자동 변경")
+        XCTAssertEqual(korean.profileActivatedNotificationBody(profileName: "MyHotspot"), "\"MyHotspot\" 프로필로 자동 변경됐습니다.")
 
         let english = Localization(language: .english)
         XCTAssertEqual(english.limitReachedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] Data Limit Reached")
         XCTAssertEqual(english.limitReachedNotificationBody(profileName: "MyHotspot", limitGB: "4.50GB"), "The configured data limit (4.50GB) has been reached. Hotspot connection has been disconnected.")
         XCTAssertEqual(english.blockingFailedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] Blocking Failure Warning")
         XCTAssertEqual(english.blockingFailedNotificationBody(profileName: "MyHotspot", reason: "timeout"), "Failed to enforce hotspot data block: timeout")
+        XCTAssertEqual(english.profileActivatedNotificationTitle(profileName: "MyHotspot"), "[MyHotspot] Profile Automatically Changed")
+        XCTAssertEqual(english.profileActivatedNotificationBody(profileName: "MyHotspot"), "Automatically changed to the \"MyHotspot\" profile.")
+    }
+
+    func testAutomaticProfileActivationDetectorWaitsForProfileSnapshotAfterNetworkChange() throws {
+        let oldProfileID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let newProfileID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let oldIdentity = WiFiIdentitySnapshot(
+            interfaceName: "en0",
+            interfaceIndex: 1,
+            linkState: .associated,
+            ssid: try SSID(hex: "6f6c64"),
+            bssid: try BSSID(string: "00:11:22:33:44:55")
+        )
+        let newIdentity = WiFiIdentitySnapshot(
+            interfaceName: "en0",
+            interfaceIndex: 1,
+            linkState: .associated,
+            ssid: try SSID(hex: "6e6577"),
+            bssid: try BSSID(string: "AA:BB:CC:DD:EE:FF")
+        )
+        let makeSnapshot = { (profileID: UUID?) in
+            RuntimeSnapshotV1(
+                globalSafety: .normal,
+                connectionState: profileID == nil ? .disconnected : .monitoring,
+                selectionState: profileID == nil ? .none : .selectedConnected,
+                protectionState: .blockingNotGuaranteed,
+                candidateLifecycle: .production,
+                connectedProfileID: profileID,
+                selectedProfileID: profileID,
+                storeRevision: DecimalUInt64(rawValue: 1)
+            )
+        }
+        var detector = AutomaticProfileActivationDetector()
+
+        XCTAssertNil(detector.profileIDToNotify(snapshot: makeSnapshot(oldProfileID), identity: oldIdentity))
+        XCTAssertNil(detector.profileIDToNotify(snapshot: makeSnapshot(oldProfileID), identity: newIdentity))
+        XCTAssertEqual(detector.profileIDToNotify(snapshot: makeSnapshot(newProfileID), identity: newIdentity), newProfileID)
+        XCTAssertNil(detector.profileIDToNotify(snapshot: makeSnapshot(newProfileID), identity: newIdentity))
     }
 
     func testLocalizationMenuBarFormatting() {

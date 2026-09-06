@@ -233,6 +233,12 @@ public enum StateReducer {
                 if let bssidMatch {
                     newState.resolvedProfileID = bssidMatch.profileID
                     newState.connectionState = .monitoring
+                    if state.resolvedProfileID != bssidMatch.profileID,
+                       newState.store.selectedProfileID != bssidMatch.profileID,
+                       let updatedStore = try? newState.store.updatingStore(selectedProfileID: bssidMatch.profileID) {
+                        newState.store = updatedStore
+                        effects.append(.persistStore(updatedStore))
+                    }
                 } else {
                     newState.resolvedProfileID = nil
                     newState.connectionState = .needsBSSIDConfirmation
@@ -249,8 +255,11 @@ public enum StateReducer {
                 if let resolved = newState.resolvedIdentity, resolved.bssid == bssid {
                     newState.resolvedProfileID = profileID
                     newState.connectionState = .monitoring
+                    if let selectedStore = try? newState.store.updatingStore(selectedProfileID: profileID) {
+                        newState.store = selectedStore
+                    }
                 }
-                effects.append(.persistStore(updatedStore))
+                effects.append(.persistStore(newState.store))
             }
 
         case let .authorizationChanged(isAvailable):

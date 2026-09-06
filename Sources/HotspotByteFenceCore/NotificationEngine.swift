@@ -7,6 +7,36 @@ public enum NotificationCategory: String, Sendable {
     case limitReached
     case blockingFailed
     case warningThreshold
+    case profileActivated
+}
+
+public struct AutomaticProfileActivationDetector: Sendable {
+    private var hasObservedState = false
+    private var lastIdentity: WiFiIdentitySnapshot?
+    private var lastProfileID: UUID?
+    private var networkChangePending = false
+
+    public init() {}
+
+    public mutating func profileIDToNotify(
+        snapshot: RuntimeSnapshotV1,
+        identity: WiFiIdentitySnapshot?
+    ) -> UUID? {
+        if hasObservedState, identity != lastIdentity {
+            networkChangePending = true
+        }
+
+        let profileID = snapshot.connectedProfileID
+        let shouldNotify = networkChangePending && identity != nil && profileID != nil && profileID != lastProfileID
+
+        hasObservedState = true
+        lastIdentity = identity
+        lastProfileID = profileID
+
+        guard shouldNotify else { return nil }
+        networkChangePending = false
+        return profileID
+    }
 }
 
 public enum NotificationSuppressionReason: String, Equatable, Sendable {

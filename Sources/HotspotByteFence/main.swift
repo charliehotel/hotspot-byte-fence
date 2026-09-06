@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let loginController: LoginItemControlling = DarwinLoginItemController()
     private let notificationDelivery: NotificationDeliverySource = DarwinNotificationDelivery()
     private var lastNotifiedPercent: Double = 0
+    private var promptedNetwork: WiFiIdentitySnapshot?
+    private var automaticProfileActivationDetector = AutomaticProfileActivationDetector()
 #if canImport(CoreLocation)
     private var locationManager: CLLocationManager?
 #endif
@@ -724,6 +726,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let currentStore = await newEngine.currentStore()
                     self.rebuildMenu(snapshot: snapshot, identity: identity, store: currentStore)
                     SettingsWindowController.shared.updateLocalization(self.localization)
+                    await self.handleAutomaticProfileNotification(snapshot: snapshot, identity: identity, store: currentStore)
+                    await self.offerProfileRegistration(identity: identity, engine: newEngine)
                     await self.handleUsageNotifications(snapshot: snapshot, store: currentStore, engine: newEngine)
                 }
             }
@@ -731,6 +735,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fputs("Failed to initialize runtime engine: \(error)\n", stderr)
         }
     }
+
+    private func offerProfileRegistration(identity: WiFiIdentitySnapshot?, engine: RuntimeEngine) async {
+        guard let identity else {
+            promptedNetwork = nil
+            return
+        }
+        guard promptedNetwork != identity else { return }
+        promptedNetwork = identity
+        let snapshot = await engine.currentSnapshot()
+        guard snapshot.connectionState == .unknownNetwork,
+              await engine.currentResolvedIdentity() == identity else { return }
+        let ssid = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
+        let alert = NSAlert()
+        alert.messageText = localization.newNetworkProfilePrompt(ssid: ssid)
+        alert.informativeText = localization.newNetworkProfileExplanation
+        alert.addButton(withTitle: localization.menuRegisterProfileTitle)
+        alert.addButton(withTitle: localization.profileSetupLaterTitle)
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn,
+              await engine.currentResolvedIdentity() == identity else { return }
+        registerProfileMenuItem()
+    }
+
+#if canImport(UserNotifications)
+    private func handleAutomaticProfileNotification(
+        snapshot: RuntimeSnapshotV1,
+        identity: WiFiIdentitySnapshot?,
+        store: StoreEnvelopeV1
+    ) async {
+        guard let profileID = automaticProfileActivationDetector.profileIDToNotify(
+            snapshot: snapshot,
+            identity: identity
+        ),
+              let profile = store.profiles.first(where: { $0.profileID == profileID }) else {
+            return
+        }
+        try? await notificationDelivery.deliver(
+            title: localization.profileActivatedNotificationTitle(profileName: profile.aliasNFC),
+            body: localization.profileActivatedNotificationBody(profileName: profile.aliasNFC),
+            category: .profileActivated
+        )
+    }
+#endif
 
 #if canImport(UserNotifications)
     private func handleUsageNotifications(
