@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updater = AppUpdater()
     private var aboutWindow: NSWindow?
     private var preferencesWindow: NSWindow?
+    private let profileManagement = ProfileManagementState()
 #if canImport(CoreLocation)
     private var locationManager: CLLocationManager?
 #endif
@@ -83,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildMenu(snapshot: RuntimeSnapshotV1?, identity: WiFiIdentitySnapshot?, store: StoreEnvelopeV1?) {
+        if let store, let snapshot { profileManagement.update(store: store, snapshot: snapshot) }
         let appLang: AppLanguage
         switch store?.languageOverride {
         case .ko: appLang = .korean
@@ -206,6 +208,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
         }
+
+        profilesMenu.addItem(.separator())
+        let manageItem = NSMenuItem(title: localization.effectiveLanguage == .korean ? "프로필 관리…" : "Manage Profiles…",
+                                   action: #selector(openProfileManagement), keyEquivalent: "")
+        manageItem.target = self
+        profilesMenu.addItem(manageItem)
 
         let profilesParentItem = NSMenuItem(
             title: localization.menuProfilesTitle,
@@ -546,6 +554,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func openProfileManagement() {
+        profileManagement.tab = 1
+        openSettingsWindow()
+    }
+
     @objc private func openSettingsWindow() {
         let locationGranted: Bool
 #if canImport(CoreLocation)
@@ -554,7 +567,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #else
         locationGranted = false
 #endif
-        let view = PreferencesView(localization: localization, language: { [weak self] value in self?.updateLanguage(override: value) }, toggleLaunch: { [weak self] in self?.toggleLaunchAtLogin() }, launchEnabled: loginController.status() == .enabled, locationGranted: locationGranted, openLocation: { [weak self] in self?.openLocationSettings() })
+        let view = PreferencesView(profileManagement: profileManagement, editProfile: { [weak self] id in
+            guard let self, let engine = self.engine else { return }
+            SettingsWindowController.shared.show(engine: engine, localization: self.localization, profileID: id)
+        }, registerProfile: { [weak self] in self?.registerProfileMenuItem() }, localization: localization, language: { [weak self] value in self?.updateLanguage(override: value) }, toggleLaunch: { [weak self] in self?.toggleLaunchAtLogin() }, launchEnabled: loginController.status() == .enabled, locationGranted: locationGranted, openLocation: { [weak self] in self?.openLocationSettings() })
         let controller = NSHostingController(rootView: view)
         let window = preferencesWindow ?? NSWindow(contentViewController: controller)
         window.contentViewController = controller
@@ -708,6 +724,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let newEngine = RuntimeEngine(store: store, initialEnvelope: envelope)
             self.engine = newEngine
+            self.profileManagement.engine = newEngine
 
             let snapshots = newEngine.snapshots
             Task { [weak self] in

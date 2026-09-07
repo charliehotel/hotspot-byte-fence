@@ -3,6 +3,13 @@ import Foundation
 public protocol EnvelopeStoreProtocol: Sendable {
     func commitEnvelope(_ document: StoreEnvelopeV1, operation: JournalOperation) throws
     func loadEnvelope() throws -> StoreLoadResult<StoreEnvelopeV1>
+    func commitEnvelopeProfileDeletion(_ document: StoreEnvelopeV1, tombstones: TombstoneSetV1) throws
+}
+
+public extension EnvelopeStoreProtocol {
+    func commitEnvelopeProfileDeletion(_ document: StoreEnvelopeV1, tombstones: TombstoneSetV1) throws {
+        throw PersistenceError.unsupportedOperation
+    }
 }
 
 public protocol InterfaceCounterSource: Sendable {

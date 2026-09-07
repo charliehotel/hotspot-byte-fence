@@ -2,6 +2,9 @@ import SwiftUI
 import HotspotByteFenceCore
 
 struct PreferencesView: View {
+    @ObservedObject var profileManagement: ProfileManagementState
+    let editProfile: (UUID) -> Void
+    let registerProfile: () -> Void
     let localization: Localization
     let language: (StoreLanguageOverrideV1) -> Void
     let toggleLaunch: () -> Void
@@ -12,6 +15,16 @@ struct PreferencesView: View {
     private var isKorean: Bool { localization.effectiveLanguage == .korean }
 
     var body: some View {
+        TabView(selection: $profileManagement.tab) {
+            generalPreferences.tabItem { Text(isKorean ? "일반" : "General") }.tag(0)
+            ProfileManagementView(state: profileManagement, localization: localization, edit: editProfile, register: registerProfile)
+                .tabItem { Text(isKorean ? "프로필 관리" : "Profiles") }.tag(1)
+        }
+        .padding(12)
+        .frame(width: 600, height: 700)
+    }
+
+    private var generalPreferences: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(localization.effectiveLanguage == .korean ? "일반" : "General")
                 .font(.system(size: 18, weight: .semibold))

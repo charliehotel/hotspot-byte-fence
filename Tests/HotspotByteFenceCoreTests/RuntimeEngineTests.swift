@@ -8,6 +8,59 @@ final class RuntimeEngineTests: XCTestCase {
     private let ssidHex = "486f7473706f74"
     private let timeZone = TimeZone(identifier: "Asia/Seoul")!
 
+    func testProfileManagementPersistsOrderAndDeletion() async throws {
+        let initial = try makeEnvelope().withSelfBoundDigest(lkgDigest: nil, validatedAt: Date(timeIntervalSince1970: 20))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hbf-profile-management-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let disk = try JournaledStateStore<StoreEnvelopeV1>(directory: directory, installationID: initial.installationID)
+        try disk.commitEnvelope(initial, operation: .measurementSample)
+        let engine = RuntimeEngine(store: disk, initialEnvelope: initial, counterSource: TestCounterSource(), identitySource: TestWiFiIdentitySource())
+        _ = try await engine.createOrUpdateProfile(alias: "Second", limitBytes: ByteCount(500_000_000), resetDay: 1,
+            interfaceName: "en0", ssidHex: "5365636f6e64", bssid: bssid1)
+        let withSecond = await engine.currentStore()
+        let secondID = try XCTUnwrap(withSecond.profiles.last?.profileID)
+        try await engine.reorderProfiles(ids: [secondID, profileID])
+        guard case let .loaded(reordered) = try disk.loadEnvelope() else { return XCTFail("Order must reload") }
+        XCTAssertEqual(reordered.profiles.map(\.profileID), [secondID, profileID])
+        do {
+            try await engine.reorderProfiles(ids: [profileID, profileID])
+            XCTFail("Reject stale or duplicate lists")
+        } catch {
+            XCTAssertEqual(error as? ProfileManagementError, .staleProfileList)
+        }
+        let identity = WiFiIdentitySnapshot(interfaceName: "en0", interfaceIndex: 1, linkState: .associated,
+            ssid: try SSID(hex: ssidHex), bssid: bssid1)
+        _ = try await engine.handle(event: .networkResolutionChanged(identity: identity))
+        try await engine.deleteProfile(id: secondID)
+        let afterInactiveDeletion = await engine.currentSnapshot()
+        XCTAssertEqual(afterInactiveDeletion.connectedProfileID, profileID)
+        try await engine.deleteProfile(id: profileID)
+        let deleted = await engine.currentSnapshot()
+        XCTAssertNil(deleted.connectedProfileID)
+        XCTAssertNil(deleted.selectedProfileID)
+        XCTAssertEqual(deleted.connectionState, .unknownNetwork)
+        let runtimeState = await engine.state
+        XCTAssertTrue(runtimeState.measurementStates.isEmpty)
+        guard case let .loaded(reloaded) = try disk.loadEnvelope() else { return XCTFail("Deletion must reload") }
+        XCTAssertTrue(reloaded.profiles.isEmpty)
+        XCTAssertNil(reloaded.selectedProfileID)
+        let lkg = try disk.decodeLKG()
+        XCTAssertTrue(lkg.profiles.isEmpty)
+    }
+
+    func testFailedProfileDeletionKeepsProfileAndRequiresRecovery() async throws {
+        let (engine, _, _, _, _) = try makeEngine()
+        do {
+            try await engine.deleteProfile(id: profileID)
+            XCTFail("The test store does not support deletion commits")
+        } catch {
+            let stored = await engine.currentStore()
+            XCTAssertEqual(stored.profiles.map(\.profileID), [profileID])
+            let snapshot = await engine.currentSnapshot()
+            XCTAssertEqual(snapshot.globalSafety, .recoveryRequired)
+        }
+    }
+
     @MainActor
     func testFractionalGBSettingsAndPersistence() async throws {
         let (engine, _, _, _, _) = try makeEngine()

@@ -1,5 +1,11 @@
 import Foundation
 
+public enum ProfileManagementError: Error, Equatable, Sendable {
+    case staleProfileList
+    case restorationPending
+    case recoveryRequired
+}
+
 public actor RuntimeEngine {
     public private(set) var state: RuntimeEngineState
     private let store: EnvelopeStoreProtocol
@@ -75,6 +81,59 @@ public actor RuntimeEngine {
 
     public func currentStore() -> StoreEnvelopeV1 {
         state.store
+    }
+
+    public func reorderProfiles(ids: [UUID]) throws {
+        guard state.store.globalState.safetyState == .normal else { throw ProfileManagementError.recoveryRequired }
+        let profiles = state.store.profiles
+        guard ids.count == profiles.count, Set(ids) == Set(profiles.map(\.profileID)) else {
+            throw ProfileManagementError.staleProfileList
+        }
+        let byID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.profileID, $0) })
+        let updated = try state.store.updatingStore(profiles: ids.compactMap { byID[$0] })
+        do {
+            try store.commitEnvelope(updated, operation: .measurementSample)
+        } catch {
+            state = StateReducer.reduce(state: state, event: .storeFailure(.writeFailure)).newState
+            snapshotContinuation.yield(currentSnapshot())
+            throw error
+        }
+        state.store = updated
+        snapshotContinuation.yield(currentSnapshot())
+    }
+
+    public func deleteProfile(id: UUID) throws {
+        guard state.store.globalState.safetyState == .normal else { throw ProfileManagementError.recoveryRequired }
+        guard let profile = state.store.profiles.first(where: { $0.profileID == id }) else {
+            throw ProfileManagementError.staleProfileList
+        }
+        guard !state.store.preferenceTransactions.contains(where: { $0.profileID == id && $0.phase != .restored }) else {
+            throw ProfileManagementError.restorationPending
+        }
+        let now = Date(timeIntervalSince1970: (clock.now().timeIntervalSince1970 * 1000).rounded() / 1000)
+        let revision = DecimalUInt64(rawValue: state.store.storeRevision.rawValue + 1)
+        let tombstones = try TombstoneSetV1(records: [TombstoneRecord(
+            profileID: id, deletedAt: now, deletionRevision: revision,
+            aliasDigest: StoreJSONCodec.sha256Hex(Data(profile.aliasNFC.utf8)), purgeCompleted: false
+        )])
+        let updated = try state.store.purgingProfile(id: id, newRevision: revision, deletedAt: now,
+                                                   tombstoneDigest: tombstones.canonicalDigest())
+        do {
+            try store.commitEnvelopeProfileDeletion(updated, tombstones: tombstones)
+        } catch {
+            state = StateReducer.reduce(state: state, event: .storeFailure(.writeFailure)).newState
+            snapshotContinuation.yield(currentSnapshot())
+            throw error
+        }
+        state.store = updated
+        state.measurementStates.removeValue(forKey: id)
+        if state.resolvedProfileID == id {
+            state.resolvedProfileID = nil
+            state.connectionState = state.resolvedIdentity == nil ? .disconnected : .unknownNetwork
+            state.activeObservationTracker = nil
+            state.manualReconnectTokenExpiresAt = nil
+        }
+        snapshotContinuation.yield(currentSnapshot())
     }
 
     @discardableResult
