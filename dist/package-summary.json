@@ -4,9 +4,9 @@
   "appBundlePath": "/Users/charliehotel/Dev/Project/hotspot-byte-fence/dist/HotspotByteFence.app",
   "signatureStatus": "adhoc",
   "digests": {
-    "unsignedAssetSHA256": "f5b3f3718260d2eae6a6f835d5c37c107a877a1239003cf1048f4e722a907889",
-    "appBundleSHA256": "5b332d51f3d4fa549fc37f27b73c11125ca84a1cf92df7374029e444a35fa2fc",
-    "executableSHA256": "bfe5fd0e696280b7e00d30fe76526f40c694f3882af707e682eff93e6cd42dff",
+    "unsignedAssetSHA256": "7b6d061beae31a8143a0467def1380bd12e3678cd45044e6e04ba2462a2d8cc5",
+    "appBundleSHA256": "f1192d246e52126ebdbc8ee3ed372ca29053a3f8802dd709d5ecc75a2a6b0257",
+    "executableSHA256": "9e5afa564ba01cb10164d9c812ed7ca0bae7c8f8eb5abe7432ff5d29e784efa8",
     "manifestSHA256": "293787c1eb08b984a22fffa92c435fc89c880cf61cc2b6e91fd363687cc96070"
   }
 }

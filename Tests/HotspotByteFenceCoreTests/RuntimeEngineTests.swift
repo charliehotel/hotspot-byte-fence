@@ -8,6 +8,35 @@ final class RuntimeEngineTests: XCTestCase {
     private let ssidHex = "486f7473706f74"
     private let timeZone = TimeZone(identifier: "Asia/Seoul")!
 
+    @MainActor
+    func testFractionalGBSettingsAndPersistence() async throws {
+        let (engine, _, _, _, _) = try makeEngine()
+        let settings = SettingsState(engine: engine, editingProfileID: profileID)
+        for _ in 0..<100 where settings.alias != "Test Profile" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(settings.alias, "Test Profile")
+        for (text, bytes) in [("0.1", UInt64(100_000_000)), ("0.5", UInt64(500_000_000))] {
+            settings.limitGBText = text
+            settings.updateSliderFromText()
+            XCTAssertEqual(settings.limitGBText, text)
+            settings.onSliderChanged(settings.sliderPosition)
+            XCTAssertEqual(settings.limitGBText, text)
+            XCTAssertFalse(settings.isUnlimited)
+            settings.savedMessage = nil
+            settings.saveProfile()
+            for _ in 0..<100 where settings.savedMessage == nil {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(settings.savedMessage, settings.localization.savedSuccessMessage)
+            let stored = await engine.currentStore()
+            let profile = try XCTUnwrap(stored.profiles.first(where: { $0.profileID == profileID }))
+            XCTAssertEqual(profile.limitBytes, ByteCount(bytes))
+            let decoded = try StoreJSONCodec.decode(ProfileRecord.self, from: StoreJSONCodec.encode(profile))
+            XCTAssertEqual(decoded.limitBytes, ByteCount(bytes))
+        }
+    }
+
     func testInitialization() async throws {
         let (engine, _, _, _, _) = try makeEngine()
         let snapshot = await engine.currentSnapshot()

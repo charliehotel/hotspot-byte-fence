@@ -235,7 +235,6 @@ public final class SettingsState: ObservableObject {
         isUnlimited = false
 
         let landmarks: [(Double, Double)] = [
-            (0.0, 0.0),
             (1.0, 5.0),
             (2.0, 10.0),
             (3.0, 20.0),
@@ -257,7 +256,7 @@ public final class SettingsState: ObservableObject {
         if pos <= 0.0 {
             gb = 0.0
         } else if pos <= 1.0 {
-            gb = (pos * 5.0).rounded()
+            gb = (pos * 50.0).rounded() / 10.0
         } else if pos <= 2.0 {
             gb = (5.0 + (pos - 1.0) * 5.0).rounded()
         } else if pos <= 3.0 {
@@ -340,10 +339,13 @@ public struct SettingsView: View {
                             Text("GB")
                                 .frame(width: 24, alignment: .leading)
                             VStack(spacing: 1) {
-                                Slider(value: $state.sliderPosition, in: 0.0...7.0)
-                                    .onChange(of: state.sliderPosition) { newPos in
+                                Slider(value: Binding(
+                                    get: { state.sliderPosition },
+                                    set: { newPos in
+                                        state.sliderPosition = newPos
                                         state.onSliderChanged(newPos)
                                     }
+                                ), in: 0.0...7.0)
                                 SliderRulerView(unlimitedLabel: state.localization.unlimitedShortLabel)
                             }
                             .frame(maxWidth: .infinity)
