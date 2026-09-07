@@ -307,6 +307,48 @@ final class StateReducerTests: XCTestCase {
         XCTAssertEqual(limitState.store.profiles.first { $0.profileID == profileID }?.limitBytes, ByteCount(500_000_000))
         XCTAssertTrue(limitEffects.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
 
+        let editedAlias = "Other Profile"
+        let (editedState, editedEffects) = StateReducer.reduce(
+            state: state,
+            event: .editProfile(
+                profileID: profileID,
+                alias: editedAlias,
+                limitBytes: ByteCount(ProfileRecord.maximumLimitBytes),
+                resetDay: 21
+            )
+        )
+        let editedProfile = editedState.store.profiles.first { $0.profileID == profileID }
+        XCTAssertEqual(editedProfile?.aliasNFC, editedAlias)
+        XCTAssertEqual(editedProfile?.limitBytes.rawValue, ProfileRecord.maximumLimitBytes)
+        XCTAssertEqual(editedProfile?.resetDay, 21)
+        XCTAssertTrue(editedEffects.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
+
+        let otherProfileID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let otherProfile = try makeProfile(profileID: otherProfileID, networkSSIDHex: "4f74686572")
+        let otherSelectedStore = try state.store.updatingStore(
+            selectedProfileID: otherProfileID,
+            profiles: [state.store.profiles[0], otherProfile]
+        )
+        let otherSelectedState = RuntimeEngineState(store: otherSelectedStore)
+        let (editedOtherState, _) = StateReducer.reduce(
+            state: otherSelectedState,
+            event: .editProfile(
+                profileID: profileID,
+                alias: "Edited While Other Is Selected",
+                limitBytes: ByteCount(200_000_000),
+                resetDay: 22
+            )
+        )
+        XCTAssertEqual(editedOtherState.store.selectedProfileID, otherProfileID)
+        XCTAssertEqual(
+            editedOtherState.store.profiles.first { $0.profileID == profileID }?.aliasNFC,
+            "Edited While Other Is Selected"
+        )
+        XCTAssertEqual(
+            editedOtherState.store.profiles.first { $0.profileID == otherProfileID }?.aliasNFC,
+            otherProfile.aliasNFC
+        )
+
         let (selState, selEffects) = StateReducer.reduce(
             state: state,
             event: .selectProfile(profileID: profileID)

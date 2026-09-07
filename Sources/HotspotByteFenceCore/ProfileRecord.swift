@@ -94,6 +94,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
    }
 
     public func updating(
+        aliasNFC: String? = nil,
         limitBytes: ByteCount? = nil,
         resetDay: UInt? = nil,
         confirmedBSSIDs: [BSSID]? = nil,
@@ -104,7 +105,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
     ) throws -> ProfileRecord {
         try ProfileRecord(
             profileID: self.profileID,
-            aliasNFC: self.aliasNFC,
+            aliasNFC: aliasNFC ?? self.aliasNFC,
             ssidHex: self.ssidHex,
             interfaceName: self.interfaceName,
             confirmedBSSIDs: confirmedBSSIDs ?? self.confirmedBSSIDs,

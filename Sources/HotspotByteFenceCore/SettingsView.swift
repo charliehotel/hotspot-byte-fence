@@ -6,18 +6,10 @@ import SwiftUI
 import CoreLocation
 #endif
 
-public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case profile
-    case notices
-
-    public var id: String { rawValue }
-}
-
 @MainActor
 public final class SettingsState: ObservableObject {
     let engine: RuntimeEngine
     @Published public var localization: Localization
-    @Published public var selectedTab: SettingsTab = .profile
     @Published public var alias: String
     @Published public var limitGBText: String = "10.0"
     @Published public var sliderPosition: Double = 2.0
@@ -29,15 +21,18 @@ public final class SettingsState: ObservableObject {
     @Published public var savedMessage: String?
     private var isUpdatingFromSlider: Bool = false
     private var isRegisteringProfile: Bool
+    private var editingProfileID: UUID?
 
     public init(
         engine: RuntimeEngine,
         localization: Localization = Localization(),
-        registeringProfile: Bool = false
+        registeringProfile: Bool = false,
+        editingProfileID: UUID? = nil
     ) {
         self.engine = engine
         self.localization = localization
         self.isRegisteringProfile = registeringProfile
+        self.editingProfileID = editingProfileID
         self.alias = localization.defaultHotspotAlias
         self.sliderPosition = gbToSliderPosition(10.0)
         refreshFromEngine()
@@ -82,12 +77,27 @@ public final class SettingsState: ObservableObject {
                     self.alias = profile.aliasNFC
                 }
             } else {
-                if let limit = snapshot.currentLimitBytes {
+                if let profileID = self.editingProfileID,
+                   let profile = store.profiles.first(where: { $0.profileID == profileID }) {
+                    if profile.limitBytes.rawValue >= ProfileRecord.maximumLimitBytes {
+                        self.isUnlimited = true
+                        self.limitGBText = newLoc.unlimitedLabel
+                        self.sliderPosition = 7.0
+                    } else {
+                        let gb = Double(profile.limitBytes.rawValue) / 1_000_000_000.0
+                        self.isUnlimited = false
+                        self.limitGBText = String(format: "%.1f", gb)
+                        self.sliderPosition = self.gbToSliderPosition(gb)
+                    }
+                    self.resetDay = Int(profile.resetDay)
+                    self.alias = profile.aliasNFC
+                } else if let limit = snapshot.currentLimitBytes {
                     let gb = Double(limit.rawValue) / 1_000_000_000.0
                     self.limitGBText = String(format: "%.1f", gb)
                     self.sliderPosition = self.gbToSliderPosition(gb)
                 }
-                if let profileID = snapshot.selectedProfileID,
+                if self.editingProfileID == nil,
+                   let profileID = snapshot.selectedProfileID,
                    let profile = store.profiles.first(where: { $0.profileID == profileID }) {
                     self.resetDay = Int(profile.resetDay)
                     self.alias = profile.aliasNFC
@@ -98,6 +108,7 @@ public final class SettingsState: ObservableObject {
 
     public func prepareForProfileRegistration() {
         isRegisteringProfile = true
+        editingProfileID = nil
         alias = localization.defaultHotspotAlias
         limitGBText = "10.0"
         sliderPosition = gbToSliderPosition(10.0)
@@ -109,6 +120,13 @@ public final class SettingsState: ObservableObject {
 
     public func prepareForProfileEditing() {
         isRegisteringProfile = false
+        editingProfileID = nil
+        refreshFromEngine()
+    }
+
+    public func prepareForProfileEditing(profileID: UUID) {
+        isRegisteringProfile = false
+        editingProfileID = profileID
         refreshFromEngine()
     }
 
@@ -133,22 +151,15 @@ public final class SettingsState: ObservableObject {
             guard let self else { return }
             let store = await self.engine.currentStore()
             let snapshot = await self.engine.currentSnapshot()
-            let selectedID = self.isRegisteringProfile ? nil : snapshot.selectedProfileID
+            let selectedID = self.isRegisteringProfile ? nil : (self.editingProfileID ?? snapshot.selectedProfileID)
             let targetProfile = selectedID.flatMap { id in store.profiles.first(where: { $0.profileID == id }) }
 
             if let targetProfile {
-                let identity = await self.engine.currentResolvedIdentity()
-                let interface = targetProfile.interfaceName ?? identity?.interfaceName ?? "en0"
-                let fallbackBSSID = identity?.bssid ?? (try! BSSID(bytes: [0, 0, 0, 0, 0, 0]))
-                let bssid = targetProfile.confirmedBSSIDs.first ?? fallbackBSSID
-                let ssidHex = targetProfile.ssidHex ?? identity?.ssid.hex ?? ""
-                _ = try? await self.engine.createOrUpdateProfile(
+                _ = try? await self.engine.editProfile(
+                    profileID: targetProfile.profileID,
                     alias: self.alias.isEmpty ? self.localization.defaultHotspotAlias : self.alias,
                     limitBytes: limitBytes,
-                    resetDay: day,
-                    interfaceName: interface,
-                    ssidHex: ssidHex,
-                    bssid: bssid
+                    resetDay: day
                 )
                 _ = try? await self.engine.performPeriodicTick()
                 self.savedMessage = self.localization.savedSuccessMessage
@@ -306,7 +317,7 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        TabView(selection: $state.selectedTab) {
+        Group {
             VStack(alignment: .leading, spacing: 12) {
                 GroupBox(label: Text(state.localization.profileSettingsGroupTitle).bold()) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -389,65 +400,8 @@ public struct SettingsView: View {
                 }
             }
             .padding(14)
-            .tabItem {
-                Label(state.localization.profileAndLimitTabTitle, systemImage: "wifi")
-            }
-            .tag(SettingsTab.profile)
-
-            VStack(alignment: .leading, spacing: 14) {
-                Text(state.localization.noticesHeaderTitle)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.primary)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(state.localization.noticeHotspotScopeTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(state.localization.disclaimerHotspotScope)
-                        .font(.system(size: 13))
-                        .foregroundColor(.primary)
-                        .lineSpacing(3)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(state.localization.noticeInterfaceMeterTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(state.localization.disclaimerInterfaceMeter)
-                        .font(.system(size: 13))
-                        .foregroundColor(.primary)
-                        .lineSpacing(3)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(state.localization.noticeVPNTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(state.localization.disclaimerVPN)
-                        .font(.system(size: 13))
-                        .foregroundColor(.primary)
-                        .lineSpacing(3)
-                }
-            }
-            .padding(14)
-            .tabItem {
-                Label(state.localization.noticesTabTitle, systemImage: "info.circle")
-            }
-            .tag(SettingsTab.notices)
         }
-        .frame(
-            width: 480,
-            height: state.selectedTab == .profile
-                ? 260
-                : (state.localization.effectiveLanguage == .korean ? 370 : 440)
-        )
-        .onChange(of: state.selectedTab) { newTab in
-            SettingsWindowController.shared.updateWindowSize(for: newTab, localization: state.localization, animated: true)
-        }
+        .frame(width: 480, height: 260)
     }
 }
 
@@ -460,14 +414,15 @@ public final class SettingsWindowController {
     public func show(
         engine: RuntimeEngine,
         localization: Localization = Localization(),
-        registeringProfile: Bool = false
+        registeringProfile: Bool = false,
+        profileID: UUID? = nil
     ) {
         if let window {
             updateLocalization(localization)
             if registeringProfile {
                 state?.prepareForProfileRegistration()
             } else {
-                state?.prepareForProfileEditing()
+                if let profileID { state?.prepareForProfileEditing(profileID: profileID) } else { state?.prepareForProfileEditing() }
             }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -477,7 +432,8 @@ public final class SettingsWindowController {
         let state = SettingsState(
             engine: engine,
             localization: localization,
-            registeringProfile: registeringProfile
+            registeringProfile: registeringProfile,
+            editingProfileID: registeringProfile ? nil : profileID
         )
         self.state = state
         let hostingController = NSHostingController(rootView: SettingsView(state: state))
@@ -503,29 +459,6 @@ public final class SettingsWindowController {
             state.localization = localization
         }
         self.window?.title = localization.settingsWindowTitle
-        if let currentTab = state?.selectedTab {
-            updateWindowSize(for: currentTab, localization: localization, animated: true)
-        }
-    }
-
-    public func updateWindowSize(for tab: SettingsTab, localization: Localization? = nil, animated: Bool = true) {
-        guard let window else { return }
-        let currentLoc = localization ?? state?.localization ?? Localization()
-        let noticesHeight: CGFloat = currentLoc.effectiveLanguage == .korean ? 370 : 440
-        let targetSize = tab == .profile
-            ? NSSize(width: 480, height: 260)
-            : NSSize(width: 480, height: noticesHeight)
-
-        let currentFrame = window.frame
-        let newFrameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: targetSize)).size
-        let newOriginY = currentFrame.origin.y + (currentFrame.size.height - newFrameSize.height)
-        let newFrame = NSRect(
-            x: currentFrame.origin.x,
-            y: newOriginY,
-            width: newFrameSize.width,
-            height: newFrameSize.height
-        )
-        window.setFrame(newFrame, display: true, animate: animated)
     }
 }
 #endif

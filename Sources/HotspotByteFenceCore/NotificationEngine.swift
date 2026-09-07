@@ -8,6 +8,56 @@ public enum NotificationCategory: String, Sendable {
     case blockingFailed
     case warningThreshold
     case profileActivated
+    case usage50
+    case usage80
+
+    public var preference: NotificationPreference {
+        switch self {
+        case .profileActivated: return .automaticProfileChange
+        case .limitReached, .blockingFailed: return .networkBlocking
+        case .usage50: return .usage50
+        case .usage80: return .usage80
+        case .warningThreshold: return .usage90
+        }
+    }
+}
+
+public enum NotificationPreference: String, CaseIterable, Sendable {
+    case automaticProfileChange, networkBlocking, usage50, usage80, usage90
+
+    public var key: String { "notifications.enabled.\(rawValue)" }
+
+    public func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? true
+    }
+}
+
+public struct UsageNotificationTracker: Sendable {
+    private var observations: [UUID: (cycle: String, percent: Double, protection: ProtectionState)] = [:]
+
+    public init() {}
+
+    public mutating func observe(profileID: UUID, cycle: String, percent: Double,
+                                 protection: ProtectionState, paused: Bool,
+                                 enabledThresholds: Set<NotificationPreference> = [.usage50, .usage80, .usage90]) -> [NotificationCategory] {
+        let previous = observations[profileID]
+        let previousPercent = previous?.cycle == cycle && percent >= (previous?.percent ?? 0)
+            ? previous?.percent ?? 0 : 0
+        observations[profileID] = (cycle, percent, protection)
+        if !paused, protection == .blockingFailed,
+           previous?.cycle != cycle || previous?.protection != .blockingFailed {
+            return [.blockingFailed]
+        }
+        if !paused, protection == .limitReached,
+           previous?.cycle != cycle || previous?.protection != .limitReached {
+            return [.limitReached]
+        }
+        if percent >= 100 { return [] }
+        if percent >= 90 && previousPercent < 90 && enabledThresholds.contains(.usage90) { return [.warningThreshold] }
+        if percent >= 80 && previousPercent < 80 && enabledThresholds.contains(.usage80) { return [.usage80] }
+        if percent >= 50 && previousPercent < 50 && enabledThresholds.contains(.usage50) { return [.usage50] }
+        return []
+    }
 }
 
 public struct AutomaticProfileActivationDetector: Sendable {
@@ -197,6 +247,7 @@ public final class DarwinNotificationDelivery: NotificationDeliverySource {
     public init() {}
 
     public func deliver(title: String, body: String, category: NotificationCategory) async throws {
+        guard category.preference.isEnabled() else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

@@ -3,6 +3,50 @@ import XCTest
 @testable import HotspotByteFenceCore
 
 final class LocalizationAndNotificationTests: XCTestCase {
+    func testNotificationPreferencesPersistAndMapEveryCategory() throws {
+        let suite = "HBF.NotificationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for preference in NotificationPreference.allCases {
+            XCTAssertTrue(preference.isEnabled(in: defaults))
+            defaults.set(false, forKey: preference.key)
+            XCTAssertFalse(preference.isEnabled(in: try XCTUnwrap(UserDefaults(suiteName: suite))))
+            defaults.set(true, forKey: preference.key)
+        }
+        XCTAssertEqual(NotificationCategory.profileActivated.preference, .automaticProfileChange)
+        XCTAssertEqual(NotificationCategory.limitReached.preference, .networkBlocking)
+        XCTAssertEqual(NotificationCategory.blockingFailed.preference, .networkBlocking)
+        XCTAssertEqual(NotificationCategory.usage50.preference, .usage50)
+        XCTAssertEqual(NotificationCategory.usage80.preference, .usage80)
+        XCTAssertEqual(NotificationCategory.warningThreshold.preference, .usage90)
+    }
+
+    func testUsageNotificationCrossingsAreIndependentAndResetWithCycleOrUsage() {
+        var tracker = UsageNotificationTracker()
+        let first = UUID(), second = UUID()
+        func observe(_ id: UUID, _ percent: Double, _ cycle: String = "2026-09-01",
+                     _ protection: ProtectionState = .strongBlockingReady, _ paused: Bool = false) -> [NotificationCategory] {
+            tracker.observe(profileID: id, cycle: cycle, percent: percent, protection: protection, paused: paused)
+        }
+        XCTAssertEqual(observe(first, 49), [])
+        XCTAssertEqual(observe(first, 50), [.usage50])
+        XCTAssertEqual(observe(first, 51), [])
+        XCTAssertEqual(observe(first, 80), [.usage80])
+        XCTAssertEqual(observe(first, 90), [.warningThreshold])
+        XCTAssertEqual(observe(second, 50), [.usage50])
+        XCTAssertEqual(observe(first, 91), [])
+        XCTAssertEqual(observe(first, 0), [])
+        XCTAssertEqual(observe(first, 50), [.usage50])
+        XCTAssertEqual(observe(first, 50, "2026-10-01"), [.usage50])
+        XCTAssertEqual(observe(first, 100, "2026-10-01", .blockingPaused, true), [])
+        XCTAssertEqual(observe(first, 100, "2026-10-01", .blockingFailed), [.blockingFailed])
+        XCTAssertEqual(observe(first, 100, "2026-10-01", .blockingFailed), [])
+        XCTAssertEqual(observe(first, 100, "2026-10-01", .limitReached), [.limitReached])
+        XCTAssertEqual(observe(first, 100, "2026-10-01", .limitReached), [])
+        XCTAssertEqual(tracker.observe(profileID: UUID(), cycle: "2026-10-01", percent: 91,
+            protection: .strongBlockingReady, paused: false, enabledThresholds: [.usage80]), [.usage80])
+    }
+
     func testLocalizationLanguageResolution() {
         let korean = Localization(language: .korean)
         XCTAssertEqual(korean.effectiveLanguage, .korean)
@@ -335,12 +379,6 @@ final class LocalizationAndNotificationTests: XCTestCase {
         XCTAssertEqual(english.formatPresetResetDay(day: 1), "Day 1")
         XCTAssertEqual(english.formatPresetResetDay(day: 31), "End of month (Day 31)")
         XCTAssertEqual(english.promptCustomLimitPlaceholder, "e.g. 12.5")
-
-        #if canImport(AppKit) && canImport(SwiftUI)
-        XCTAssertEqual(SettingsTab.allCases.count, 2)
-        XCTAssertEqual(SettingsTab.profile.rawValue, "profile")
-        XCTAssertEqual(SettingsTab.notices.rawValue, "notices")
-        #endif
 
         XCTAssertEqual(MenuBarViewModel.formatLimitGB(ByteCount(5_000_000_000)), "5GB")
         XCTAssertEqual(MenuBarViewModel.formatLimitGB(ByteCount(10_000_000_000)), "10GB")

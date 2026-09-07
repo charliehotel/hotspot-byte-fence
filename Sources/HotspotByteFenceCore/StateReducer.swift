@@ -61,6 +61,7 @@ public enum RuntimeEvent: Sendable {
     case manualResetUsage(profileID: UUID)
     case changeLimit(profileID: UUID, newLimitBytes: ByteCount)
     case createOrUpdateProfile(alias: String, limitBytes: ByteCount, resetDay: UInt, interfaceName: String, ssidHex: String, bssid: BSSID)
+    case editProfile(profileID: UUID, alias: String, limitBytes: ByteCount, resetDay: UInt)
     case counterSampleIngested(sample: MeasurementSample)
     case selectProfile(profileID: UUID?)
     case setLanguageOverride(StoreLanguageOverrideV1)
@@ -315,6 +316,19 @@ public enum StateReducer {
                     effects.append(.disassociate(interfaceName: interfaceName))
                 }
 
+            }
+
+        case let .editProfile(profileID, alias, limitBytes, resetDay):
+            if let existing = newState.store.profiles.first(where: { $0.profileID == profileID }),
+               let protection = try? existing.protection.updating(limitReached: existing.measurement.usageBytes.rawValue >= limitBytes.rawValue),
+               let edited = try? existing.updating(aliasNFC: alias, limitBytes: limitBytes, resetDay: resetDay, protection: protection),
+               let store = try? newState.store.updatingStore(profiles: newState.store.profiles.map { $0.profileID == profileID ? edited : $0 }) {
+                newState.store = store
+                effects.append(.persistStore(store))
+                if protection.limitReached, !protection.pauseBlocking,
+                   newState.resolvedProfileID == profileID, let interface = edited.interfaceName {
+                    effects.append(.disassociate(interfaceName: interface))
+                }
             }
 
         case let .createOrUpdateProfile(alias, limitBytes, resetDay, interfaceName, ssidHex, bssid):

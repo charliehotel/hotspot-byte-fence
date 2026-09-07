@@ -15,6 +15,7 @@ import CoreLocation
 
 #if canImport(AppKit)
 import AppKit
+import SwiftUI
 #if canImport(UserNotifications)
 import UserNotifications
 #endif
@@ -26,19 +27,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localization = Localization()
     private let loginController: LoginItemControlling = DarwinLoginItemController()
     private let notificationDelivery: NotificationDeliverySource = DarwinNotificationDelivery()
-    private var lastNotifiedPercent: Double = 0
+    private var usageNotificationTracker = UsageNotificationTracker()
     private var promptedNetwork: WiFiIdentitySnapshot?
     private var automaticProfileActivationDetector = AutomaticProfileActivationDetector()
+    private let updater = AppUpdater()
+    private var aboutWindow: NSWindow?
+    private var preferencesWindow: NSWindow?
 #if canImport(CoreLocation)
     private var locationManager: CLLocationManager?
 #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
+        if CommandLine.arguments.contains("--preview-ui") {
+            NSApp.setActivationPolicy(.regular)
+            updater.onChange = { [weak self] in self?.refreshUpdateMenuItem() }
+            if CommandLine.arguments.contains("--preview-settings") {
+                openSettingsWindow()
+            } else {
+                openAboutWindow()
+            }
+            if CommandLine.arguments.contains("--preview-menu") {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let window = self.aboutWindow ?? self.preferencesWindow else { return }
+                    self.statusItem?.menu?.popUp(positioning: nil, at: NSPoint(x: 40, y: 80), in: window.contentView)
+                }
+            }
+            return
+        }
 #if canImport(CoreLocation)
         setupLocationManager()
 #endif
         startEngine()
+        updater.onChange = { [weak self] in self?.refreshUpdateMenuItem() }
+        updater.onInstall = { [weak self] in
+            guard let engine = self?.engine else { return }
+            do {
+                _ = try await engine.voluntaryQuit()
+            } catch {
+                await engine.startPeriodicPolling(intervalSeconds: 5.0)
+                throw error
+            }
+        }
+        updater.start()
 #if canImport(UserNotifications)
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 #endif
@@ -59,12 +90,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default: appLang = .systemDefault
         }
         self.localization = Localization(language: appLang)
+        updater.localization = localization
 
         let menu = NSMenu()
         menu.autoenablesItems = false
         let vm = snapshot.map { MenuBarViewModel(snapshot: $0, localization: localization) }
 
-        let headerItem = NSMenuItem(title: "Hotspot Byte Fence", action: nil, keyEquivalent: "")
+        let headerItem = NSMenuItem(title: "Hotspot Byte Fence", action: #selector(openAboutWindow), keyEquivalent: "")
+        headerItem.target = self
+        headerItem.setAccessibilityIdentifier("Command.About")
         headerItem.isEnabled = true
         headerItem.image = NSImage(systemSymbolName: "shield.fill", accessibilityDescription: nil)
         menu.addItem(headerItem)
@@ -91,10 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        let isRegistered = (snapshot?.connectedProfileID != nil)
         let wifiItem = NSMenuItem(title: "Wi-Fi: \(wifiName) (\(statusText))", action: nil, keyEquivalent: "")
-        wifiItem.isEnabled = isRegistered
+        wifiItem.isEnabled = true
         wifiItem.image = NSImage(systemSymbolName: identity != nil ? "wifi" : "wifi.slash", accessibilityDescription: nil)
+        wifiItem.view = MonitoringStatusMenuView(title: wifiItem.title, image: wifiItem.image)
         wifiItem.setAccessibilityIdentifier("Menu.Profile.Connected")
         menu.addItem(wifiItem)
 
@@ -112,17 +146,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let usageTitle = vm?.currentUsageText ?? Localization.disconnectedDash
         let limitTitle = vm?.limitText ?? localization.menuLimitNotSet
         let percentStr = vm?.percentageText.map { " (\($0))" } ?? ""
-        let isLimitSet = (snapshot?.currentLimitBytes != nil)
-        let usageItem = NSMenuItem(title: "\(localization.menuUsagePrefix) \(usageTitle) / \(limitTitle)\(percentStr)", action: nil, keyEquivalent: "")
-        usageItem.isEnabled = isLimitSet
+        let currentProfileID = snapshot?.connectedProfileID ?? snapshot?.selectedProfileID
+        let usageItem = NSMenuItem(title: "\(localization.menuUsagePrefix) \(usageTitle) / \(limitTitle)\(percentStr)", action: #selector(editUsageMenuItem(_:)), keyEquivalent: "")
+        usageItem.target = self
+        usageItem.representedObject = currentProfileID
+        usageItem.isEnabled = currentProfileID != nil
         usageItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: nil)
         usageItem.setAccessibilityIdentifier("Status.Measurement")
         menu.addItem(usageItem)
 
-        if let profileID = snapshot?.selectedProfileID,
+        if let profileID = currentProfileID,
            let profile = store?.profiles.first(where: { $0.profileID == profileID }) {
-            let resetItem = NSMenuItem(title: localization.formatResetDay(day: profile.resetDay), action: nil, keyEquivalent: "")
-            resetItem.isEnabled = true
+            let resetItem = NSMenuItem(title: localization.formatResetDay(day: profile.resetDay), action: #selector(editResetDayMenuItem(_:)), keyEquivalent: "")
+            resetItem.target = self
+            resetItem.representedObject = profileID
             resetItem.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
             menu.addItem(resetItem)
         }
@@ -151,34 +188,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             let activeProfileID = snapshot?.selectedProfileID ?? snapshot?.connectedProfileID
             for profile in profiles {
-                let profileItem = NSMenuItem(
-                    title: profile.aliasNFC,
-                    action: #selector(selectProfileMenuItem(_:)),
-                    keyEquivalent: ""
-                )
-                profileItem.target = self
-                profileItem.representedObject = profile.profileID
+                let profileItem = NSMenuItem(title: profile.aliasNFC, action: nil, keyEquivalent: "")
                 profileItem.state = profile.profileID == activeProfileID ? .on : .off
                 profileItem.setAccessibilityIdentifier("Menu.Profile.\(profile.profileID.uuidString)")
+                let actions = NSMenu()
+                let selectItem = NSMenuItem(title: localization.effectiveLanguage == .korean ? "선택" : "Select", action: #selector(selectProfileMenuItem(_:)), keyEquivalent: "")
+                selectItem.target = self
+                selectItem.representedObject = profile.profileID
+                selectItem.state = profileItem.state
+                actions.addItem(selectItem)
+                let editItem = NSMenuItem(title: localization.effectiveLanguage == .korean ? "편집" : "Edit", action: #selector(editProfileMenuItem(_:)), keyEquivalent: "")
+                editItem.target = self
+                editItem.representedObject = profile.profileID
+                actions.addItem(editItem)
+                profileItem.submenu = actions
                 profilesMenu.addItem(profileItem)
             }
 
-            profilesMenu.addItem(NSMenuItem.separator())
-            let selectedProfile = activeProfileID.flatMap { profileID in
-                profiles.first(where: { $0.profileID == profileID })
-            }
-            let editProfileItem = NSMenuItem(
-                title: selectedProfile.map { localization.formatEditProfile(alias: $0.aliasNFC) }
-                    ?? localization.menuEditProfileTitle,
-                action: #selector(editProfileMenuItem(_:)),
-                keyEquivalent: ""
-            )
-            editProfileItem.target = self
-            editProfileItem.representedObject = activeProfileID
-            editProfileItem.isEnabled = activeProfileID != nil
-            editProfileItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
-            editProfileItem.setAccessibilityIdentifier("Command.EditProfile")
-            profilesMenu.addItem(editProfileItem)
         }
 
         let profilesParentItem = NSMenuItem(
@@ -190,66 +216,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         profilesParentItem.image = NSImage(systemSymbolName: "person.2", accessibilityDescription: nil)
         profilesParentItem.setAccessibilityIdentifier("Command.Profiles")
         menu.addItem(profilesParentItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        let limitMenu = NSMenu()
-        let presetLimits: [Double] = [5, 10, 15, 20, 30, 50, 100]
-        let isUnlimitedCurrent = (snapshot?.currentLimitBytes?.rawValue ?? 0) >= ProfileRecord.maximumLimitBytes
-        for gb in presetLimits {
-            let item = NSMenuItem(title: "\(Int(gb)) GB", action: #selector(setPresetLimit(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = gb
-            if !isUnlimitedCurrent, let currentLimit = vm?.limitText, currentLimit == "\(Int(gb))GB" {
-                item.state = .on
-            }
-            limitMenu.addItem(item)
-        }
-
-        let unlimitedItem = NSMenuItem(
-            title: localization.unlimitedLabel,
-            action: #selector(setUnlimitedLimit),
-            keyEquivalent: ""
-        )
-        unlimitedItem.target = self
-        unlimitedItem.state = isUnlimitedCurrent ? .on : .off
-        limitMenu.addItem(unlimitedItem)
-
-        let customLimitItem = NSMenuItem(title: localization.menuCustomInput, action: #selector(promptCustomLimit), keyEquivalent: "")
-        customLimitItem.target = self
-        customLimitItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
-        limitMenu.addItem(customLimitItem)
-
-        let setLimitParentItem = NSMenuItem(title: localization.menuSetLimitTitle, action: nil, keyEquivalent: "")
-        setLimitParentItem.submenu = limitMenu
-        setLimitParentItem.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
-        setLimitParentItem.setAccessibilityIdentifier("Command.SetLimit")
-        menu.addItem(setLimitParentItem)
-
-        let resetDayMenu = NSMenu()
-        let presetDays: [(String, UInt)] = [
-            (localization.formatPresetResetDay(day: 1), 1),
-            (localization.formatPresetResetDay(day: 11), 11),
-            (localization.formatPresetResetDay(day: 21), 21),
-            (localization.formatPresetResetDay(day: 25), 25),
-            (localization.formatPresetResetDay(day: 31), 31)
-        ]
-        for (title, day) in presetDays {
-            let item = NSMenuItem(title: title, action: #selector(setPresetResetDay(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = day
-            resetDayMenu.addItem(item)
-        }
-        let customDayItem = NSMenuItem(title: localization.menuCustomResetDayInput, action: #selector(promptCustomResetDay), keyEquivalent: "")
-        customDayItem.target = self
-        customDayItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
-        resetDayMenu.addItem(customDayItem)
-
-        let setResetDayParentItem = NSMenuItem(title: localization.menuSetResetDayTitle, action: nil, keyEquivalent: "")
-        setResetDayParentItem.submenu = resetDayMenu
-        setResetDayParentItem.image = NSImage(systemSymbolName: "calendar.badge.clock", accessibilityDescription: nil)
-        setResetDayParentItem.setAccessibilityIdentifier("Command.SetResetDay")
-        menu.addItem(setResetDayParentItem)
 
         if let identity, snapshot?.connectedProfileID == nil {
             let ssidBytes = identity.ssid.bytes
@@ -277,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseItem.image = NSImage(systemSymbolName: isPaused ? "play.circle" : "pause.circle", accessibilityDescription: nil)
         pauseItem.setAccessibilityIdentifier("Command.PauseBlocking")
         menu.addItem(pauseItem)
+        menu.addItem(NSMenuItem.separator())
 
         let resetItem = NSMenuItem(
             title: localization.menuResetUsage,
@@ -290,56 +257,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        let langMenu = NSMenu()
-        let currentOverride = store?.languageOverride ?? .system
-
-        let sysLangItem = NSMenuItem(
-            title: localization.languageSystemDefault,
-            action: #selector(setLanguageSystem),
-            keyEquivalent: ""
-        )
-        sysLangItem.target = self
-        sysLangItem.state = (currentOverride == .system) ? .on : .off
-        langMenu.addItem(sysLangItem)
-
-        let koLangItem = NSMenuItem(
-            title: "한국어",
-            action: #selector(setLanguageKorean),
-            keyEquivalent: ""
-        )
-        koLangItem.target = self
-        koLangItem.state = (currentOverride == .ko) ? .on : .off
-        langMenu.addItem(koLangItem)
-
-        let enLangItem = NSMenuItem(
-            title: "English",
-            action: #selector(setLanguageEnglish),
-            keyEquivalent: ""
-        )
-        enLangItem.target = self
-        enLangItem.state = (currentOverride == .en) ? .on : .off
-        langMenu.addItem(enLangItem)
-
-        let langParentItem = NSMenuItem(title: localization.languageMenuTitle, action: nil, keyEquivalent: "")
-        langParentItem.submenu = langMenu
-        langParentItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
-        langParentItem.setAccessibilityIdentifier("Command.SetLanguage")
-        menu.addItem(langParentItem)
-
-        let isLaunchAtLogin = loginController.status() == .enabled
-        let launchItem = NSMenuItem(
-            title: localization.launchAtLoginMenuTitle,
-            action: #selector(toggleLaunchAtLogin),
-            keyEquivalent: ""
-        )
-        launchItem.target = self
-        launchItem.image = NSImage(systemSymbolName: "play.desktopcomputer", accessibilityDescription: nil)
-        launchItem.state = isLaunchAtLogin ? .on : .off
-        launchItem.setAccessibilityIdentifier("Command.LaunchAtLogin")
-        menu.addItem(launchItem)
-
-        menu.addItem(NSMenuItem.separator())
-
         let settingsItem = NSMenuItem(
             title: localization.menuSettings,
             action: #selector(openSettingsWindow),
@@ -348,6 +265,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         menu.addItem(settingsItem)
+
+        let updateItem = NSMenuItem(title: updater.menuTitle, action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.isEnabled = !updater.busy
+        updateItem.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+        updateItem.setAccessibilityIdentifier("Command.CheckForUpdates")
+        menu.addItem(updateItem)
 
         let quitItem = NSMenuItem(
             title: localization.menuQuit,
@@ -365,8 +289,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.image = icon
         statusItem?.button?.imagePosition = .imageLeading
         if let title = vm?.displayTitle {
-            statusItem?.button?.title = title
+            statusItem?.button?.title = (snapshot?.isPauseBlockingActive == true ? "⏸ " : "") + title
         }
+    }
+
+    private func refreshUpdateMenuItem() {
+        guard let item = statusItem?.menu?.items.first(where: { $0.action == #selector(checkForUpdates) }) else { return }
+        item.title = updater.menuTitle
+        item.isEnabled = !updater.busy
+    }
+
+    @objc private func checkForUpdates() {
+        Task { await updater.check(manual: true) }
+    }
+
+    @objc private func openAboutWindow() {
+        let screen = aboutWindow?.screen ?? NSScreen.main
+        let available = screen?.visibleFrame.size ?? NSSize(width: 1024, height: 768)
+        var width = min(520, available.width - 40)
+        let controller = NSHostingController(rootView: AppInformationView(localization: localization, width: width))
+        while controller.view.fittingSize.height > available.height - 60 && width < available.width - 40 {
+            width = min(width + 40, available.width - 40)
+            controller.rootView = AppInformationView(localization: localization, width: width)
+            controller.view.layoutSubtreeIfNeeded()
+        }
+        let window = aboutWindow ?? NSWindow(contentViewController: controller)
+        window.contentViewController = controller
+        window.title = localization.effectiveLanguage == .korean ? "Hotspot Byte Fence 정보" : "About Hotspot Byte Fence"
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isReleasedWhenClosed = false
+        window.setContentSize(controller.view.fittingSize)
+        if aboutWindow == nil { window.center() }
+        aboutWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func makeMenuBarImage(baseName: String, isTemplate: Bool = true) -> NSImage? {
@@ -411,7 +367,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePauseBlocking() {
         guard let engine else { return }
         Task {
-            if let profileID = await engine.currentSnapshot().selectedProfileID {
+            let snapshot = await engine.currentSnapshot()
+            if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
                 let isPaused = await engine.currentSnapshot().isPauseBlockingActive
                 _ = try? await engine.pauseBlockingToggled(profileID: profileID, isPaused: !isPaused)
             }
@@ -436,10 +393,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func editProfileMenuItem(_ sender: NSMenuItem) {
         guard let engine, let profileID = sender.representedObject as? UUID else { return }
-        Task {
-            _ = try? await engine.selectProfile(id: profileID)
-            openSettingsWindow()
-        }
+        SettingsWindowController.shared.show(engine: engine, localization: localization, profileID: profileID)
+    }
+
+    @objc private func editUsageMenuItem(_ sender: NSMenuItem) {
+        guard let engine, let profileID = sender.representedObject as? UUID else { return }
+        SettingsWindowController.shared.show(engine: engine, localization: localization, profileID: profileID)
+    }
+
+    @objc private func editResetDayMenuItem(_ sender: NSMenuItem) {
+        guard let engine, let profileID = sender.representedObject as? UUID else { return }
+        SettingsWindowController.shared.show(engine: engine, localization: localization, profileID: profileID)
     }
 
     @objc private func setPresetLimit(_ sender: NSMenuItem) {
@@ -447,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let limitBytes = ByteCount(UInt64(gb * 1_000_000_000.0))
         Task {
             let snapshot = await engine.currentSnapshot()
-            if let profileID = snapshot.selectedProfileID ?? snapshot.connectedProfileID {
+            if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
                 _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
             } else if let identity = await engine.currentResolvedIdentity() {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
@@ -460,7 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     bssid: identity.bssid
                 )
             } else {
-                openSettingsWindow()
+            SettingsWindowController.shared.show(engine: engine, localization: localization)
             }
             _ = try? await engine.performPeriodicTick()
         }
@@ -471,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let limitBytes = ByteCount(ProfileRecord.maximumLimitBytes)
         Task {
             let snapshot = await engine.currentSnapshot()
-            if let profileID = snapshot.selectedProfileID ?? snapshot.connectedProfileID {
+            if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
                 _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
             } else if let identity = await engine.currentResolvedIdentity() {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
@@ -508,7 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let engine else { return }
                 Task {
                     let snapshot = await engine.currentSnapshot()
-                    if let profileID = snapshot.selectedProfileID ?? snapshot.connectedProfileID {
+                    if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
                         _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
                     } else if let identity = await engine.currentResolvedIdentity() {
                         let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
@@ -583,8 +547,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettingsWindow() {
-        guard let engine else { return }
-        SettingsWindowController.shared.show(engine: engine, localization: localization)
+        let locationGranted: Bool
+#if canImport(CoreLocation)
+        let locationStatus = locationManager?.authorizationStatus
+        locationGranted = locationStatus == .authorized || locationStatus == .authorizedAlways
+#else
+        locationGranted = false
+#endif
+        let view = PreferencesView(localization: localization, language: { [weak self] value in self?.updateLanguage(override: value) }, toggleLaunch: { [weak self] in self?.toggleLaunchAtLogin() }, launchEnabled: loginController.status() == .enabled, locationGranted: locationGranted, openLocation: { [weak self] in self?.openLocationSettings() })
+        let controller = NSHostingController(rootView: view)
+        let window = preferencesWindow ?? NSWindow(contentViewController: controller)
+        window.contentViewController = controller
+        window.title = localization.settingsWindowTitle
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isReleasedWhenClosed = false
+        window.setContentSize(controller.view.fittingSize)
+        if preferencesWindow == nil { window.center() }
+        preferencesWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func openLocationSettings() {
@@ -609,6 +590,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await MainActor.run {
                 self.rebuildMenu(snapshot: snapshot, identity: identity, store: store)
                 SettingsWindowController.shared.updateLocalization(self.localization)
+                if self.preferencesWindow?.isVisible == true { self.openSettingsWindow() }
+                if self.aboutWindow?.isVisible == true { self.openAboutWindow() }
             }
         }
     }
@@ -639,6 +622,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let store = await engine.currentStore()
                 await MainActor.run {
                     self.rebuildMenu(snapshot: snapshot, identity: identity, store: store)
+                    if self.preferencesWindow?.isVisible == true { self.openSettingsWindow() }
                 }
             }
         } catch {
@@ -648,8 +632,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func confirmResetUsage() {
         guard let engine else { return }
+        let alert = NSAlert()
+        alert.messageText = localization.manualResetTitle
+        alert.informativeText = localization.manualResetMessage
+        alert.addButton(withTitle: localization.confirm)
+        alert.addButton(withTitle: localization.cancel)
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task {
-            if let profileID = await engine.currentSnapshot().selectedProfileID {
+            let snapshot = await engine.currentSnapshot()
+            if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
                 _ = try? await engine.manualResetUsage(profileID: profileID)
             }
         }
@@ -728,7 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     SettingsWindowController.shared.updateLocalization(self.localization)
                     await self.handleAutomaticProfileNotification(snapshot: snapshot, identity: identity, store: currentStore)
                     await self.offerProfileRegistration(identity: identity, engine: newEngine)
-                    await self.handleUsageNotifications(snapshot: snapshot, store: currentStore, engine: newEngine)
+                    await self.handleUsageNotifications(snapshot: snapshot, store: currentStore)
                 }
             }
         } catch {
@@ -782,12 +774,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #if canImport(UserNotifications)
     private func handleUsageNotifications(
         snapshot: RuntimeSnapshotV1,
-        store: StoreEnvelopeV1,
-        engine: RuntimeEngine
+        store: StoreEnvelopeV1
     ) async {
         guard let usage = snapshot.currentUsageBytes,
               let limit = snapshot.currentLimitBytes,
-              limit.rawValue > 0,
+              limit.rawValue > 0, limit.rawValue < ProfileRecord.maximumLimitBytes,
               let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID,
               let profile = store.profiles.first(where: { $0.profileID == profileID }) else {
             return
@@ -796,40 +787,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alias = profile.aliasNFC
         let limitText = UsageFormatter.formatGB(limit)
         let cycleDate = profile.cycle.cycleID.effectiveDate
-        let notifRecord = store.notificationState.profileNotificationStates[profileID] ?? (try? ProfileNotificationRecord()) ?? (try! ProfileNotificationRecord())
-
-        if NotificationEvaluator.shouldNotifyLimitReached(
-            isPauseBlockingActive: snapshot.isPauseBlockingActive,
-            protectionState: snapshot.protectionState,
-            usagePercent: percent,
-            lastNotifiedPercent: lastNotifiedPercent
-        ) {
-            lastNotifiedPercent = 100
-            if case .deliver = (try? NotificationEvaluator.evaluateLimitReached(
-                record: notifRecord, currentCycleDate: cycleDate
-            )) ?? .suppressed(reason: .alreadyNotifiedInCycle) {
-                try? await notificationDelivery.deliver(
-                    title: localization.limitReachedNotificationTitle(profileName: alias),
-                    body: localization.limitReachedNotificationBody(profileName: alias, limitGB: limitText),
-                    category: .limitReached
-                )
+        let categories = usageNotificationTracker.observe(
+            profileID: profileID, cycle: cycleDate, percent: percent,
+            protection: snapshot.protectionState, paused: snapshot.isPauseBlockingActive,
+            enabledThresholds: Set(NotificationPreference.allCases.filter { $0.isEnabled() })
+        )
+        for category in categories {
+            let title: String
+            let body: String
+            switch category {
+            case .limitReached:
+                title = localization.limitReachedNotificationTitle(profileName: alias)
+                body = localization.limitReachedNotificationBody(profileName: alias, limitGB: limitText)
+            case .blockingFailed:
+                title = localization.blockingFailedNotificationTitle(profileName: alias)
+                body = localization.effectiveLanguage == .korean
+                    ? "네트워크 차단을 완료하지 못했습니다. Wi-Fi 연결과 사용량을 확인해 주세요."
+                    : "Network blocking could not be completed. Check your Wi-Fi connection and data usage."
+            case .usage50, .usage80, .warningThreshold:
+                let threshold = category == .usage50 ? 50 : category == .usage80 ? 80 : 90
+                title = localization.warningThresholdNotificationTitle(profileName: alias, percent: threshold)
+                body = localization.warningThresholdNotificationBody(profileName: alias, limitGB: limitText, percent: threshold)
+            case .profileActivated:
+                continue
             }
-        } else if percent >= 90 && lastNotifiedPercent < 90 {
-            lastNotifiedPercent = 90
-            if case .deliver = (try? NotificationEvaluator.evaluateWarningThreshold(
-                record: notifRecord, currentCycleDate: cycleDate
-            )) ?? .suppressed(reason: .alreadyNotifiedInCycle) {
-                try? await notificationDelivery.deliver(
-                    title: localization.warningThresholdNotificationTitle(profileName: alias),
-                    body: localization.warningThresholdNotificationBody(profileName: alias, limitGB: limitText),
-                    category: .warningThreshold
-                )
+            do {
+                try await notificationDelivery.deliver(title: title, body: body, category: category)
+            } catch {
+                fputs("Failed to deliver usage notification: \(error)\n", stderr)
             }
-        } else if percent < 90 {
-            lastNotifiedPercent = percent
         }
     }
 #endif
+}
+
+@MainActor
+private final class MonitoringStatusMenuView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {}
+
+    init(title: String, image: NSImage?) {
+        super.init(frame: .zero)
+        autoresizingMask = [.width]
+        let label = NSTextField(labelWithString: title)
+        label.font = .menuFont(ofSize: 0)
+        label.textColor = .labelColor
+        let icon = NSImageView()
+        icon.image = image
+        icon.contentTintColor = .labelColor
+        let row = NSStackView(views: [icon, label])
+        row.spacing = 8
+        row.alignment = .centerY
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        setFrameSize(NSSize(width: label.fittingSize.width + 58, height: 24))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(title)
+    }
+
+    required init?(coder: NSCoder) { nil }
 }
 
 #if canImport(CoreLocation)
@@ -855,6 +883,7 @@ extension AppDelegate: CLLocationManagerDelegate {
             let store = await engine.currentStore()
             self.rebuildMenu(snapshot: snapshot, identity: identity, store: store)
             SettingsWindowController.shared.updateLocalization(self.localization)
+            if self.preferencesWindow?.isVisible == true { self.openSettingsWindow() }
         }
     }
 }
@@ -863,7 +892,7 @@ extension AppDelegate: CLLocationManagerDelegate {
 
 @main
 struct HotspotByteFence {
-    static func main() throws {
+    @MainActor static func main() throws {
         let args = CommandLine.arguments
        let isJSON = args.contains("--json")
 

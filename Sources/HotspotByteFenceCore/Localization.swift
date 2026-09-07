@@ -109,16 +109,26 @@ public struct Localization: Sendable {
             : "The configured data limit (\(limitGB)) has been reached. Hotspot connection has been disconnected."
     }
 
-    public func warningThresholdNotificationTitle(profileName: String) -> String {
+    public func warningThresholdNotificationTitle(profileName: String, percent: Int = 90) -> String {
         isKorean
-            ? "[\(profileName)] 데이터 한도 90% 도달"
-            : "[\(profileName)] 90% of Data Limit Reached"
+            ? "[\(profileName)] 데이터 한도 \(percent)% 도달"
+            : "[\(profileName)] \(percent)% of Data Limit Reached"
     }
 
-    public func warningThresholdNotificationBody(profileName: String, limitGB: String) -> String {
+    public func warningThresholdNotificationBody(profileName: String, limitGB: String, percent: Int = 90) -> String {
         isKorean
-            ? "목표 사용량의 90%에 도달했습니다. 곧 핫스팟 연결이 차단될 수 있습니다."
-            : "You have used 90% of your \(limitGB) data limit. The hotspot connection may be blocked soon."
+            ? "목표 사용량(\(limitGB))의 \(percent)%에 도달했습니다."
+            : "You have used \(percent)% of your \(limitGB) data limit."
+    }
+
+    public func notificationPreferenceTitle(_ preference: NotificationPreference) -> String {
+        switch preference {
+        case .automaticProfileChange: return isKorean ? "프로필 자동 변경" : "Automatic Profile Changes"
+        case .networkBlocking: return isKorean ? "네트워크 차단 및 차단 실패" : "Network Blocking and Failures"
+        case .usage50: return isKorean ? "목표 사용량 50% 도달" : "50% of Data Limit"
+        case .usage80: return isKorean ? "목표 사용량 80% 도달" : "80% of Data Limit"
+        case .usage90: return isKorean ? "목표 사용량 90% 도달" : "90% of Data Limit"
+        }
     }
 
     public func profileActivatedNotificationTitle(profileName: String) -> String {

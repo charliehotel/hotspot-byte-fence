@@ -243,6 +243,15 @@ public actor RuntimeEngine {
     }
 
     @discardableResult
+    public func editProfile(profileID: UUID, alias: String, limitBytes: ByteCount, resetDay: UInt) async throws -> RuntimeSnapshotV1 {
+        guard let profile = state.store.profiles.first(where: { $0.profileID == profileID }) else {
+            throw NSError(domain: "ProfileEditor", code: 1, userInfo: [NSLocalizedDescriptionKey: "Profile no longer exists"])
+        }
+        _ = try profile.updating(aliasNFC: alias, limitBytes: limitBytes, resetDay: resetDay)
+        return try await handle(event: .editProfile(profileID: profileID, alias: alias, limitBytes: limitBytes, resetDay: resetDay))
+    }
+
+    @discardableResult
     public func changeResetDay(profileID: UUID, newResetDay: UInt) async throws -> RuntimeSnapshotV1 {
         try await handle(event: .changeResetDay(profileID: profileID, newResetDay: newResetDay))
     }

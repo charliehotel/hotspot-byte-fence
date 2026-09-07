@@ -1,12 +1,12 @@
 {
-  "applicationVersion": "0.1.0-dev",
+  "applicationVersion": "0.1.0",
   "bundleIdentifier": "com.copylawbot.hotspotbytefence",
   "appBundlePath": "/Users/charliehotel/Dev/Project/hotspot-byte-fence/dist/HotspotByteFence.app",
   "signatureStatus": "adhoc",
   "digests": {
-    "unsignedAssetSHA256": "038fa969c586f948f91de4adcccbc934c4612d6f509eff7f8ecab5ef0a7478f8",
-    "appBundleSHA256": "fcd4ad861fe3907ef7996b7dd572b3c194df8ec4b1b1dc449c36b4cbb6e498d3",
-    "executableSHA256": "2f969195916e6fb46eac77b10798a1140c3670f57b8189b8199fd113d066f281",
-    "manifestSHA256": "24dfc2857b461c8aa227bd683b6016bd6aa58c75ca21d96a7534eea8e520f935"
+    "unsignedAssetSHA256": "f5b3f3718260d2eae6a6f835d5c37c107a877a1239003cf1048f4e722a907889",
+    "appBundleSHA256": "5b332d51f3d4fa549fc37f27b73c11125ca84a1cf92df7374029e444a35fa2fc",
+    "executableSHA256": "bfe5fd0e696280b7e00d30fe76526f40c694f3882af707e682eff93e6cd42dff",
+    "manifestSHA256": "293787c1eb08b984a22fffa92c435fc89c880cf61cc2b6e91fd363687cc96070"
   }
 }
