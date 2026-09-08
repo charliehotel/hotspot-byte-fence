@@ -229,8 +229,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let ssidBytes = identity.ssid.bytes
             let ssidStr = String(bytes: ssidBytes, encoding: .utf8) ?? identity.ssid.hex
             let registerItem = NSMenuItem(
-                title: localization.formatRegisterHotspot(ssid: ssidStr),
-                action: #selector(registerCurrentWiFiAsHotspot),
+                title: snapshot?.connectionState == .needsBSSIDConfirmation
+                    ? localization.confirmExistingHotspotTitle
+                    : localization.formatRegisterHotspot(ssid: ssidStr),
+                action: snapshot?.connectionState == .needsBSSIDConfirmation
+                    ? #selector(confirmCurrentHotspot) : #selector(registerCurrentWiFiAsHotspot),
                 keyEquivalent: ""
             )
             registerItem.target = self
@@ -745,14 +748,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func confirmCurrentHotspot() {
+        guard let engine else { return }
+        Task {
+            promptedNetwork = nil
+            await offerProfileRegistration(identity: await engine.currentResolvedIdentity(), engine: engine)
+        }
+    }
+
     private func offerProfileRegistration(identity: WiFiIdentitySnapshot?, engine: RuntimeEngine) async {
         guard let identity else {
             promptedNetwork = nil
             return
         }
         guard promptedNetwork != identity else { return }
-        promptedNetwork = identity
         let snapshot = await engine.currentSnapshot()
+        guard snapshot.connectionState == .unknownNetwork || snapshot.connectionState == .needsBSSIDConfirmation else { return }
+        promptedNetwork = identity
+        if snapshot.connectionState == .needsBSSIDConfirmation {
+            let profiles = await engine.currentStore().profiles.filter {
+                $0.isComplete && $0.interfaceName == identity.interfaceName && $0.ssidHex == identity.ssid.hex
+            }
+            guard !profiles.isEmpty else { return }
+            let alert = NSAlert()
+            alert.messageText = localization.confirmExistingHotspotTitle
+            alert.informativeText = localization.changedHotspotExplanation
+            let choices = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
+            for profile in profiles { choices.addItem(withTitle: profile.aliasNFC) }
+            alert.accessoryView = choices
+            alert.addButton(withTitle: localization.continueExistingProfileTitle)
+            alert.addButton(withTitle: localization.cancel)
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn,
+                  profiles.indices.contains(choices.indexOfSelectedItem) else { return }
+            do {
+                // Refresh the observed connection after the modal before accepting its address.
+                _ = try await engine.performPeriodicTick()
+                guard await engine.currentResolvedIdentity() == identity else { return }
+                try await engine.confirmBSSID(profileID: profiles[choices.indexOfSelectedItem].profileID, bssid: identity.bssid)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+            return
+        }
         guard snapshot.connectionState == .unknownNetwork,
               await engine.currentResolvedIdentity() == identity else { return }
         let ssid = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex

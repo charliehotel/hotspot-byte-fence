@@ -41,6 +41,34 @@ final class StateReducerTests: XCTestCase {
         XCTAssertEqual(reconnected.store.selectedProfileID, profileID)
     }
 
+    func testChangedBSSIDApprovalPreservesUsageAndResumesMonitoring() throws {
+        var state = try makeInitialState()
+        let profile = try state.store.profiles[0].updating(
+            measurement: MeasurementRecord.initial(usageBytes: ByteCount(1_710_000_000))
+        )
+        state.store = try state.store.updatingStore(profiles: [profile])
+        let identity = WiFiIdentitySnapshot(
+            interfaceName: "en0", interfaceIndex: 1, linkState: .associated,
+            ssid: try SSID(hex: ssidHex), bssid: bssid2
+        )
+        let (pending, _) = StateReducer.reduce(state: state, event: .networkResolutionChanged(identity: identity))
+        let (staleApproval, _) = StateReducer.reduce(state: pending, event: .confirmBSSID(profileID: profileID, bssid: bssid1))
+        XCTAssertEqual(staleApproval.connectionState, .needsBSSIDConfirmation)
+        XCTAssertEqual(staleApproval.store.profiles[0], profile)
+        let (disconnected, _) = StateReducer.reduce(state: pending, event: .networkResolutionChanged(identity: nil))
+        let (cancelled, _) = StateReducer.reduce(state: disconnected, event: .confirmBSSID(profileID: profileID, bssid: bssid2))
+        XCTAssertEqual(cancelled.store.profiles[0], profile)
+        let (confirmed, _) = StateReducer.reduce(state: pending, event: .confirmBSSID(profileID: profileID, bssid: bssid2))
+        XCTAssertNil(pending.resolvedProfileID)
+        XCTAssertEqual(confirmed.resolvedProfileID, profileID)
+        XCTAssertEqual(confirmed.connectionState, .monitoring)
+        XCTAssertEqual(confirmed.store.profiles.count, 1)
+        XCTAssertEqual(confirmed.store.profiles[0].measurement.usageBytes, ByteCount(1_710_000_000))
+        XCTAssertEqual(confirmed.store.profiles[0].limitBytes, profile.limitBytes)
+        let (reconnected, _) = StateReducer.reduce(state: confirmed, event: .networkResolutionChanged(identity: identity))
+        XCTAssertEqual(reconnected.connectionState, .monitoring)
+    }
+
     func testGlobalSafetyTransitionsAndEffects() throws {
         let state = try makeInitialState()
 

@@ -52,7 +52,7 @@ public enum BuildManifestError: Error, Equatable {
 public enum BuildConfiguration {
     public static let compiledMode: CompiledMode = .strongBlockingCapable
     public static let manifest = BuildManifestV1(
-        applicationVersion: "0.1.0",
+        applicationVersion: "0.1.1",
         sourceRevision: nil,
         compiledMode: compiledMode
     )

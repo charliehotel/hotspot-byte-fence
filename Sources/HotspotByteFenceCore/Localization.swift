@@ -282,6 +282,20 @@ public struct Localization: Sendable {
         isKorean ? "프로필 등록..." : "Register Profile..."
     }
 
+    public var confirmExistingHotspotTitle: String {
+        isKorean ? "기존 핫스팟 다시 확인…" : "Confirm Existing Hotspot…"
+    }
+
+    public var changedHotspotExplanation: String {
+        isKorean
+            ? "등록된 Wi-Fi 이름과 같지만 접속 주소(BSSID)가 변경되었습니다. 같은 핫스팟이라면 아래 프로필을 확인해 주세요. 기존 사용량과 설정을 유지하며 모니터링을 재개합니다."
+            : "The Wi-Fi name matches a saved profile, but its address (BSSID) has changed. If this is the same hotspot, confirm the profile below to resume monitoring with its existing usage and settings."
+    }
+
+    public var continueExistingProfileTitle: String {
+        isKorean ? "기존 프로필로 계속 사용" : "Continue with Existing Profile"
+    }
+
     public func newNetworkProfilePrompt(ssid: String) -> String {
         isKorean ? "‘\(ssid)’의 프로필을 설정할까요?" : "Set up a profile for ‘\(ssid)’?"
     }

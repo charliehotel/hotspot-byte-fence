@@ -247,6 +247,12 @@ public enum StateReducer {
             }
 
         case let .confirmBSSID(profileID, bssid):
+            guard let identity = newState.resolvedIdentity,
+                  identity.bssid == bssid,
+                  newState.store.profiles.contains(where: {
+                      $0.profileID == profileID && $0.isComplete &&
+                      $0.interfaceName == identity.interfaceName && $0.ssidHex == identity.ssid.hex
+                  }) else { break }
             if let updatedStore = try? appendProfileBSSID(
                 store: newState.store,
                 profileID: profileID,

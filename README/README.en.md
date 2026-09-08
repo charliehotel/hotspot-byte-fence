@@ -20,7 +20,7 @@ Hotspot Byte Fence is a macOS app that displays your Mac’s Wi-Fi hotspot data 
 - **Preferences:** Choose Korean, English, or the system default language; enable launch at login; turn individual notification types on or off.
 - **Update checks:** Checks for the latest public release daily and downloads, installs, and restarts with your approval.
 
-The current source version is **0.1.0** and includes Wi-Fi blocking. The target platform is **Apple Silicon Mac (arm64), macOS 13 or later**. These are the build’s minimum requirements, not a claim that every macOS version has been tested. Check the release notes for the environments in which the distributed app was verified.
+The current source version is **0.1.1** and includes Wi-Fi blocking. The target platform is **Apple Silicon Mac (arm64), macOS 13 or later**. These are the build’s minimum requirements, not a claim that every macOS version has been tested. Check the release notes for the environments in which the distributed app was verified.
 
 ## Installing it yourself
 
