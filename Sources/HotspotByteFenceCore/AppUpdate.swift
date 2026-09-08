@@ -74,6 +74,8 @@ public enum AppUpdatePolicy {
         exit 1
     fi
     if ! /usr/bin/open "$3"; then /usr/bin/open -R "$4"; exit 1; fi
+    # Preserve the backup if Trash is unavailable.
+    /usr/bin/osascript -l JavaScript -e 'ObjC.import("Foundation"); function run(argv) { if (!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPath(argv[0]), Ref(), Ref())) { throw new Error("Unable to move backup to Trash"); } }' "$4" || /usr/bin/open -R "$4"
     """
 
     public static let interval: TimeInterval = 24 * 60 * 60

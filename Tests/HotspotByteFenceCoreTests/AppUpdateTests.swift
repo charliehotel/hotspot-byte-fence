@@ -11,10 +11,16 @@ final class AppUpdateTests: XCTestCase {
         let backup = directory.appendingPathComponent("backup app")
         try Data("old".utf8).write(to: current)
         try Data("new".utf8).write(to: staged)
-        func install() throws -> Int32 {
+        let trashed = directory.appendingPathComponent("trashed app")
+        let trashHelper = directory.appendingPathComponent("trash-helper")
+        try Data("#!/bin/sh\nfor path do :; done\n/bin/mv \"$path\" \"$(dirname \"$path\")/trashed app\"\n".utf8).write(to: trashHelper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: trashHelper.path)
+        func install(launchSucceeds: Bool = true, trashSucceeds: Bool = true) throws -> Int32 {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", AppUpdatePolicy.installScript.replacingOccurrences(of: "/usr/bin/open", with: "/usr/bin/true"), "test", "2147483647", staged.path, current.path, backup.path]
+            process.arguments = ["-c", AppUpdatePolicy.installScript
+                .replacingOccurrences(of: "/usr/bin/open", with: launchSucceeds ? "/usr/bin/true" : "/usr/bin/false")
+                .replacingOccurrences(of: "/usr/bin/osascript", with: trashSucceeds ? "\"\(trashHelper.path)\"" : "/usr/bin/false"), "test", "2147483647", staged.path, current.path, backup.path]
             process.standardError = FileHandle.nullDevice
             try process.run()
             process.waitUntilExit()
@@ -22,11 +28,24 @@ final class AppUpdateTests: XCTestCase {
         }
         XCTAssertEqual(try install(), 0)
         XCTAssertEqual(try String(contentsOf: current, encoding: .utf8), "new")
-        XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "old")
-        try FileManager.default.removeItem(at: backup)
+        XCTAssertEqual(try String(contentsOf: trashed, encoding: .utf8), "old")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path))
+        try FileManager.default.removeItem(at: trashed)
         XCTAssertEqual(try install(), 1)
         XCTAssertEqual(try String(contentsOf: current, encoding: .utf8), "new")
         XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: trashed.path))
+
+        try Data("next".utf8).write(to: staged)
+        XCTAssertEqual(try install(launchSucceeds: false), 1)
+        XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "new")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: trashed.path))
+        try FileManager.default.removeItem(at: backup)
+
+        try Data("latest".utf8).write(to: staged)
+        XCTAssertEqual(try install(trashSucceeds: false), 0)
+        XCTAssertEqual(try String(contentsOf: current, encoding: .utf8), "latest")
+        XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "next")
     }
 
     func testReleaseAndInstallationBoundaries() throws {

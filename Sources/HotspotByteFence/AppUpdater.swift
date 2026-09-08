@@ -125,8 +125,8 @@ final class AppUpdater {
         let alert = NSAlert()
         alert.messageText = korean ? "\(release.tag_name)을 설치하고 다시 시작할까요?" : "Install \(release.tag_name) and restart?"
         alert.informativeText = korean
-            ? "설치 위치: \(target.path)\n기존 앱은 같은 폴더에 백업하고 프로필·사용량은 유지합니다. 앱을 종료한 동안에는 측정과 차단이 중단됩니다. 로컬 서명이 변경되어 위치·알림 권한을 다시 허용해야 할 수 있습니다."
-            : "Install at: \(target.path)\nThe previous app will be backed up beside it. Profiles and usage are preserved. Monitoring and blocking stop while the app is closed. Local signing may require granting location and notification permissions again."
+            ? "설치 위치: \(target.path)\n기존 앱은 새 앱의 실행 요청이 성공하면 휴지통으로 옮깁니다. 이동에 실패하면 설치 폴더에 백업을 보존합니다. 프로필·사용량은 유지합니다. 앱을 종료한 동안에는 측정과 차단이 중단됩니다. 로컬 서명이 변경되어 위치·알림 권한을 다시 허용해야 할 수 있습니다."
+            : "Install at: \(target.path)\nThe previous app moves to Trash after the new app’s launch request succeeds. If moving it fails, the backup stays in the installation folder. Profiles and usage are preserved. Monitoring and blocking stop while the app is closed. Local signing may require granting location and notification permissions again."
         alert.addButton(withTitle: korean ? "설치 및 다시 시작" : "Install and Restart")
         alert.addButton(withTitle: korean ? "취소" : "Cancel")
         NSApp.activate(ignoringOtherApps: true)
@@ -135,7 +135,7 @@ final class AppUpdater {
         try FileManager.default.copyItem(at: app, to: staged)
         let backup = target.deletingLastPathComponent().appendingPathComponent("HotspotByteFence-backup-\(UUID().uuidString).app")
         do {
-            // The helper uses positional arguments, never interpolated shell paths. Keep the backup for recovery.
+            // The helper uses positional arguments, never interpolated shell paths. Keep the backup until the launch request succeeds.
             let helper = Process()
             helper.executableURL = URL(fileURLWithPath: "/bin/sh")
             helper.arguments = ["-c", AppUpdatePolicy.installScript, "hbf-update", String(ProcessInfo.processInfo.processIdentifier), staged.path, target.path, backup.path]
