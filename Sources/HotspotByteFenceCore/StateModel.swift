@@ -132,7 +132,7 @@ public struct RuntimeSnapshotV1: Equatable, Sendable {
         if profile.protection.retry.state == .scheduled || profile.protection.retry.state == .running {
             return .blockingFailed
         }
-        if profile.protection.limitReached {
+        if profile.protection.limitReached && !profile.isUnlimited {
             return .limitReached
         }
         if candidateLifecycle == .operatorValidation {

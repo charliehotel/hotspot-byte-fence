@@ -8,7 +8,8 @@ public enum MenuBarUsageState: String, Equatable, Sendable {
     case limitReached
 
     public static func from(usageBytes: ByteCount, limitBytes: ByteCount) -> MenuBarUsageState {
-        guard limitBytes.rawValue > 0 else { return .normal }
+        guard limitBytes.rawValue > 0,
+              limitBytes.rawValue < ProfileRecord.maximumLimitBytes else { return .normal }
         let ratio = Double(usageBytes.rawValue) / Double(limitBytes.rawValue)
         if ratio >= 1.0 {
             return .limitReached

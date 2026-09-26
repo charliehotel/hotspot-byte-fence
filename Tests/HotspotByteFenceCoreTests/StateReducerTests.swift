@@ -293,6 +293,60 @@ final class StateReducerTests: XCTestCase {
         XCTAssertTrue(effects4.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
     }
 
+    func testUnlimitedProfileCannotReachSentinelOrBlockWiFi() throws {
+        let initialState = try makeInitialState()
+        let limit = ByteCount(ProfileRecord.maximumLimitBytes)
+        let priorUsage = ByteCount(limit.rawValue - 50)
+        let profile = try initialState.store.profiles[0].updating(
+            limitBytes: limit,
+            measurement: MeasurementRecord.initial(usageBytes: priorUsage),
+            protection: try initialState.store.profiles[0].protection.updating(limitReached: true)
+        )
+        let identity = WiFiIdentitySnapshot(
+            interfaceName: "en0", interfaceIndex: 1, linkState: .associated,
+            ssid: try SSID(hex: ssidHex), bssid: bssid1
+        )
+        let state = RuntimeEngineState(
+            store: try initialState.store.updatingStore(selectedProfileID: profileID, profiles: [profile]),
+            resolvedIdentity: identity,
+            connectionState: .monitoring,
+            resolvedProfileID: profileID,
+            measurementStates: [profileID: MeasurementState(cycleID: profile.cycle.cycleID, usageBytes: priorUsage)]
+        )
+
+        XCTAssertNotEqual(StateReducer.currentSnapshot(for: state).protectionState, .limitReached)
+        let baselineSample = MeasurementSample(
+            identity: identity,
+            counters: CounterSnapshot(rx: 0, tx: 0),
+            cycleID: profile.cycle.cycleID
+        )
+        let (afterBaseline, _) = StateReducer.reduce(
+            state: state,
+            event: .counterSampleIngested(sample: baselineSample)
+        )
+        let overSentinelSample = MeasurementSample(
+            identity: identity,
+            counters: CounterSnapshot(rx: 10_000_000, tx: 0),
+            cycleID: profile.cycle.cycleID
+        )
+        let (afterUsage, effects) = StateReducer.reduce(
+            state: afterBaseline,
+            event: .counterSampleIngested(sample: overSentinelSample)
+        )
+        let updatedProfile = try XCTUnwrap(afterUsage.store.profiles.first)
+        XCTAssertGreaterThan(updatedProfile.measurement.usageBytes.rawValue, limit.rawValue)
+        XCTAssertFalse(updatedProfile.protection.limitReached)
+        XCTAssertFalse(effects.contains(.disassociate(interfaceName: "en0")))
+
+        let (afterStaleEvent, staleEventEffects) = StateReducer.reduce(
+            state: afterUsage,
+            event: .limitReached(profileID: profileID)
+        )
+        XCTAssertFalse(afterStaleEvent.store.profiles[0].protection.limitReached)
+        XCTAssertFalse(staleEventEffects.contains(.disassociate(interfaceName: "en0")))
+        XCTAssertEqual(MenuBarUsageState.from(usageBytes: updatedProfile.measurement.usageBytes, limitBytes: limit), .normal)
+    }
+
     func testProfileManagementEvents() throws {
         let state = try makeInitialState()
         let newCycleID = CycleID(effectiveDate: "2026-10-01", timeZoneID: "Asia/Seoul")

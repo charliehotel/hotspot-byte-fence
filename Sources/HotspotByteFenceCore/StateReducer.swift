@@ -281,6 +281,7 @@ public enum StateReducer {
                 newState.store = updatedStore
                 effects.append(.persistStore(updatedStore))
                 if let profile = updatedStore.profiles.first(where: { $0.profileID == profileID }),
+                   profile.protection.limitReached,
                    let interfaceName = profile.interfaceName,
                    !profile.protection.pauseBlocking {
                     effects.append(.disassociate(interfaceName: interfaceName))
@@ -326,7 +327,10 @@ public enum StateReducer {
 
         case let .editProfile(profileID, alias, limitBytes, resetDay):
             if let existing = newState.store.profiles.first(where: { $0.profileID == profileID }),
-               let protection = try? existing.protection.updating(limitReached: existing.measurement.usageBytes.rawValue >= limitBytes.rawValue),
+               let protection = try? existing.protection.updating(limitReached: ProfileRecord.hasReachedLimit(
+                   usageBytes: existing.measurement.usageBytes,
+                   limitBytes: limitBytes
+               )),
                let edited = try? existing.updating(aliasNFC: alias, limitBytes: limitBytes, resetDay: resetDay, protection: protection),
                let store = try? newState.store.updatingStore(profiles: newState.store.profiles.map { $0.profileID == profileID ? edited : $0 }) {
                 newState.store = store
@@ -343,7 +347,10 @@ public enum StateReducer {
                 $0.interfaceName == interfaceName && $0.ssidHex == ssidHex
             }
             if let existing {
-                let reached = existing.measurement.usageBytes.rawValue >= limitBytes.rawValue
+                let reached = ProfileRecord.hasReachedLimit(
+                    usageBytes: existing.measurement.usageBytes,
+                    limitBytes: limitBytes
+                )
                 let updatedConfirmed = existing.confirmedBSSIDs.contains(bssid)
                     ? existing.confirmedBSSIDs
                     : existing.confirmedBSSIDs + [bssid]
@@ -454,7 +461,10 @@ public enum StateReducer {
            switch outcome {
             case let .usageAdded(_, persistence):
                 let newUsage = accumulator.state.usageBytes
-                let reached = newUsage.rawValue >= profile.limitBytes.rawValue
+                let reached = ProfileRecord.hasReachedLimit(
+                    usageBytes: newUsage,
+                    limitBytes: profile.limitBytes
+                )
                 let shouldFlushImmediately = (persistence == .requiredAndImmediate || reached)
                 let bytesSinceLastFlush = shouldFlushImmediately ? ByteCount(0) : accumulator.state.bytesSinceLastFlush
                if let updatedStore = try? updateProfileUsageAndLimit(
@@ -639,7 +649,7 @@ public enum StateReducer {
    ) throws -> StoreEnvelopeV1 {
        let updatedProfiles = try store.profiles.map { profile -> ProfileRecord in
            guard profile.profileID == profileID else { return profile }
-            let newProtection = try profile.protection.updating(limitReached: reached)
+            let newProtection = try profile.protection.updating(limitReached: reached && !profile.isUnlimited)
             return try profile.updating(protection: newProtection)
        }
         return try store.updatingStore(profiles: updatedProfiles)
@@ -684,7 +694,10 @@ public enum StateReducer {
    ) throws -> StoreEnvelopeV1 {
        let updatedProfiles = try store.profiles.map { profile -> ProfileRecord in
            guard profile.profileID == profileID else { return profile }
-            let reached = profile.measurement.usageBytes.rawValue >= newLimitBytes.rawValue
+            let reached = ProfileRecord.hasReachedLimit(
+                usageBytes: profile.measurement.usageBytes,
+                limitBytes: newLimitBytes
+            )
             let newProtection = try profile.protection.updating(limitReached: reached)
             return try profile.updating(
                 limitBytes: newLimitBytes,
@@ -734,7 +747,7 @@ public enum StateReducer {
                  case .recoveryRequired: .notGuaranteed
              }
              let newProtection = try profile.protection.updating(
-                 limitReached: limitReached,
+                limitReached: limitReached && !profile.isUnlimited,
                  blockingCapability: newCapability
              )
             return try profile.updating(

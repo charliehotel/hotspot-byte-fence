@@ -19,6 +19,14 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
 
+    public var isUnlimited: Bool {
+        limitBytes.rawValue >= Self.maximumLimitBytes
+    }
+
+    public static func hasReachedLimit(usageBytes: ByteCount, limitBytes: ByteCount) -> Bool {
+        limitBytes.rawValue < maximumLimitBytes && usageBytes.rawValue >= limitBytes.rawValue
+    }
+
     public init(
         profileID: UUID,
         aliasNFC: String,

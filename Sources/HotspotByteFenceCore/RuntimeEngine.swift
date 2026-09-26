@@ -366,7 +366,7 @@ public actor RuntimeEngine {
     }
 
     public func flush() throws {
-        let op: JournalOperation = state.store.profiles.contains(where: { $0.protection.limitReached })
+        let op: JournalOperation = state.store.profiles.contains(where: { $0.protection.limitReached && !$0.isUnlimited })
             ? .limitReached
             : .measurementSample
         try store.commitEnvelope(state.store, operation: op)
@@ -376,7 +376,7 @@ public actor RuntimeEngine {
         switch effect {
         case let .persistStore(envelope):
             do {
-                let op: JournalOperation = envelope.profiles.contains(where: { $0.protection.limitReached })
+                let op: JournalOperation = envelope.profiles.contains(where: { $0.protection.limitReached && !$0.isUnlimited })
                     ? .limitReached
                     : .measurementSample
                 try store.commitEnvelope(envelope, operation: op)
@@ -400,8 +400,13 @@ public actor RuntimeEngine {
         guard let adapter = preferenceAdapter else { return }
         let targetProfile = state.resolvedProfileID.flatMap { id in
             state.store.profiles.first(where: { $0.profileID == id })
-        } ?? state.store.profiles.first(where: { $0.protection.limitReached && !$0.protection.pauseBlocking })
+        } ?? state.store.profiles.first(where: {
+            $0.protection.limitReached && !$0.isUnlimited && !$0.protection.pauseBlocking
+        })
         guard let profile = targetProfile,
+              profile.protection.limitReached,
+              !profile.isUnlimited,
+              !profile.protection.pauseBlocking,
               let interfaceName = profile.interfaceName else {
             return
         }
