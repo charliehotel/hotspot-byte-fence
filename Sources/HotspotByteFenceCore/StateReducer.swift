@@ -59,9 +59,9 @@ public enum RuntimeEvent: Sendable {
     case limitReached(profileID: UUID)
     case pauseBlockingToggled(profileID: UUID, isPaused: Bool)
     case manualResetUsage(profileID: UUID)
-    case changeLimit(profileID: UUID, newLimitBytes: ByteCount)
-    case createOrUpdateProfile(alias: String, limitBytes: ByteCount, resetDay: UInt, interfaceName: String, ssidHex: String, bssid: BSSID)
-    case editProfile(profileID: UUID, alias: String, limitBytes: ByteCount, resetDay: UInt)
+    case changeQuota(profileID: UUID, quota: QuotaLimit)
+    case createOrUpdateProfile(alias: String, quota: QuotaLimit, resetDay: UInt, interfaceName: String, ssidHex: String, bssid: BSSID)
+    case editProfile(profileID: UUID, alias: String, quota: QuotaLimit, resetDay: UInt)
     case counterSampleIngested(sample: MeasurementSample)
     case selectProfile(profileID: UUID?)
     case setLanguageOverride(StoreLanguageOverrideV1)
@@ -281,6 +281,7 @@ public enum StateReducer {
                 newState.store = updatedStore
                 effects.append(.persistStore(updatedStore))
                 if let profile = updatedStore.profiles.first(where: { $0.profileID == profileID }),
+                   profile.protection.limitReached,
                    let interfaceName = profile.interfaceName,
                    !profile.protection.pauseBlocking {
                     effects.append(.disassociate(interfaceName: interfaceName))
@@ -308,11 +309,11 @@ public enum StateReducer {
                 effects.append(.persistStore(updatedStore))
             }
 
-        case let .changeLimit(profileID, newLimitBytes):
-            if let updatedStore = try? updateProfileLimitBytes(
+        case let .changeQuota(profileID, quota):
+            if let updatedStore = try? updateProfileQuota(
                 store: newState.store,
                 profileID: profileID,
-                newLimitBytes: newLimitBytes
+                quota: quota
             ) {
                 newState.store = updatedStore
                 effects.append(.persistStore(updatedStore))
@@ -324,10 +325,13 @@ public enum StateReducer {
 
             }
 
-        case let .editProfile(profileID, alias, limitBytes, resetDay):
+        case let .editProfile(profileID, alias, quota, resetDay):
             if let existing = newState.store.profiles.first(where: { $0.profileID == profileID }),
-               let protection = try? existing.protection.updating(limitReached: existing.measurement.usageBytes.rawValue >= limitBytes.rawValue),
-               let edited = try? existing.updating(aliasNFC: alias, limitBytes: limitBytes, resetDay: resetDay, protection: protection),
+               let protection = try? existing.protection.updating(limitReached: ProfileRecord.hasReachedLimit(
+                   usageBytes: existing.measurement.usageBytes,
+                   quota: quota
+               )),
+               let edited = try? existing.updating(aliasNFC: alias, quota: quota, resetDay: resetDay, protection: protection),
                let store = try? newState.store.updatingStore(profiles: newState.store.profiles.map { $0.profileID == profileID ? edited : $0 }) {
                 newState.store = store
                 effects.append(.persistStore(store))
@@ -337,13 +341,16 @@ public enum StateReducer {
                 }
             }
 
-        case let .createOrUpdateProfile(alias, limitBytes, resetDay, interfaceName, ssidHex, bssid):
+        case let .createOrUpdateProfile(alias, quota, resetDay, interfaceName, ssidHex, bssid):
             let now = Date()
             let existing = newState.store.profiles.first {
                 $0.interfaceName == interfaceName && $0.ssidHex == ssidHex
             }
             if let existing {
-                let reached = existing.measurement.usageBytes.rawValue >= limitBytes.rawValue
+                let reached = ProfileRecord.hasReachedLimit(
+                    usageBytes: existing.measurement.usageBytes,
+                    quota: quota
+                )
                 let updatedConfirmed = existing.confirmedBSSIDs.contains(bssid)
                     ? existing.confirmedBSSIDs
                     : existing.confirmedBSSIDs + [bssid]
@@ -356,7 +363,7 @@ public enum StateReducer {
                     confirmedBSSIDs: updatedConfirmed,
                     isComplete: true,
                     sharesInterfaceSSID: existing.sharesInterfaceSSID,
-                    limitBytes: limitBytes,
+                    quota: quota,
                     resetDay: resetDay,
                     cycle: existing.cycle,
                     measurement: existing.measurement,
@@ -412,7 +419,7 @@ public enum StateReducer {
                        confirmedBSSIDs: [bssid],
                        isComplete: true,
                        sharesInterfaceSSID: false,
-                       limitBytes: limitBytes,
+                       quota: quota,
                        resetDay: resetDay,
                        cycle: cycle,
                        measurement: measurement,
@@ -454,7 +461,10 @@ public enum StateReducer {
            switch outcome {
             case let .usageAdded(_, persistence):
                 let newUsage = accumulator.state.usageBytes
-                let reached = newUsage.rawValue >= profile.limitBytes.rawValue
+                let reached = ProfileRecord.hasReachedLimit(
+                    usageBytes: newUsage,
+                    quota: profile.quota
+                )
                 let shouldFlushImmediately = (persistence == .requiredAndImmediate || reached)
                 let bytesSinceLastFlush = shouldFlushImmediately ? ByteCount(0) : accumulator.state.bytesSinceLastFlush
                if let updatedStore = try? updateProfileUsageAndLimit(
@@ -552,7 +562,7 @@ public enum StateReducer {
            selectedProfileAlias: (activeProfile ?? selectedProfile)?.aliasNFC,
            isPauseBlockingActive: (activeProfile ?? selectedProfile)?.protection.pauseBlocking ?? false,
             currentUsageBytes: activeProfile?.measurement.usageBytes,
-           currentLimitBytes: activeProfile?.limitBytes,
+           currentQuota: activeProfile?.quota,
            cycleID: activeProfile?.cycle.cycleID,
             authorizationAvailable: state.authorizationAvailable,
             storeRevision: state.store.storeRevision,
@@ -639,7 +649,7 @@ public enum StateReducer {
    ) throws -> StoreEnvelopeV1 {
        let updatedProfiles = try store.profiles.map { profile -> ProfileRecord in
            guard profile.profileID == profileID else { return profile }
-            let newProtection = try profile.protection.updating(limitReached: reached)
+            let newProtection = try profile.protection.updating(limitReached: reached && !profile.isUnlimited)
             return try profile.updating(protection: newProtection)
        }
         return try store.updatingStore(profiles: updatedProfiles)
@@ -677,17 +687,20 @@ public enum StateReducer {
         return try store.updatingStore(profiles: updatedProfiles)
    }
 
-   private static func updateProfileLimitBytes(
+   private static func updateProfileQuota(
        store: StoreEnvelopeV1,
        profileID: UUID,
-       newLimitBytes: ByteCount
+       quota: QuotaLimit
    ) throws -> StoreEnvelopeV1 {
        let updatedProfiles = try store.profiles.map { profile -> ProfileRecord in
            guard profile.profileID == profileID else { return profile }
-            let reached = profile.measurement.usageBytes.rawValue >= newLimitBytes.rawValue
+            let reached = ProfileRecord.hasReachedLimit(
+                usageBytes: profile.measurement.usageBytes,
+                quota: quota
+            )
             let newProtection = try profile.protection.updating(limitReached: reached)
             return try profile.updating(
-                limitBytes: newLimitBytes,
+                quota: quota,
                 protection: newProtection
            )
        }
@@ -734,7 +747,7 @@ public enum StateReducer {
                  case .recoveryRequired: .notGuaranteed
              }
              let newProtection = try profile.protection.updating(
-                 limitReached: limitReached,
+                limitReached: limitReached && !profile.isUnlimited,
                  blockingCapability: newCapability
              )
             return try profile.updating(

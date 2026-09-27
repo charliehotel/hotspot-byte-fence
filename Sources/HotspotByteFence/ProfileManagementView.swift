@@ -86,8 +86,9 @@ struct ProfileManagementView: View {
                             Text(networkName(profile)).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(profile.limitBytes.rawValue >= ProfileRecord.maximumLimitBytes
-                             ? localization.unlimitedLabel : UsageFormatter.formatGB(profile.limitBytes))
+                        Text(profile.quota.isUnlimited
+                             ? localization.unlimitedLabel
+                             : profile.quota.finiteBytes.map { UsageFormatter.formatGB($0) } ?? "")
                             .monospacedDigit()
                     }
                     .padding(.vertical, 6)

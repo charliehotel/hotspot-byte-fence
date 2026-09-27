@@ -39,6 +39,39 @@ final class ProfilePersistenceTests: XCTestCase {
         )
     }
 
+    func testLegacyUnlimitedMarkerLoadsAsUnlimitedAndFiniteMaximumStaysFinite() throws {
+        let oldProfile = try makeProfile(
+            limitBytes: ByteCount(ProfileRecord.maximumLimitBytes)
+        )
+        XCTAssertEqual(oldProfile.quota, .unlimited)
+        XCTAssertNil(oldProfile.limitBytes)
+
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: StoreJSONCodec.encode(oldProfile)) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "quota")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject, options: [.sortedKeys])
+        let migrated = try StoreJSONCodec.decode(ProfileRecord.self, from: legacyData)
+        XCTAssertEqual(migrated.quota, .unlimited)
+        XCTAssertFalse(ProfileRecord.hasReachedLimit(
+            usageBytes: ByteCount(ProfileRecord.maximumLimitBytes + 1),
+            quota: migrated.quota
+        ))
+
+        let finiteMaximum = try makeProfile().updating(
+            quota: .finite(ByteCount(ProfileRecord.maximumLimitBytes))
+        )
+        XCTAssertEqual(finiteMaximum.quota, .finite(ByteCount(ProfileRecord.maximumLimitBytes)))
+        XCTAssertTrue(ProfileRecord.hasReachedLimit(
+            usageBytes: ByteCount(ProfileRecord.maximumLimitBytes),
+            quota: finiteMaximum.quota
+        ))
+        XCTAssertEqual(
+            try StoreJSONCodec.decode(ProfileRecord.self, from: StoreJSONCodec.encode(finiteMaximum)).quota,
+            .finite(ByteCount(ProfileRecord.maximumLimitBytes))
+        )
+    }
+
     func testProfileRejectsInvalidCompletionLimitAndDateOrder() throws {
         XCTAssertThrowsError(try makeProfile(limitBytes: ByteCount(9_999_999))) { error in
             XCTAssertEqual(error as? ProfileRecordValidationError, .invalidLimit)

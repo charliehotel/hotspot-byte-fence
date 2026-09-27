@@ -70,31 +70,43 @@ public final class SettingsState: ObservableObject {
                    let profile = store.profiles.first(where: {
                        $0.interfaceName == identity.interfaceName && $0.ssidHex == identity.ssid.hex
                    }) {
-                    let gb = Double(profile.limitBytes.rawValue) / 1_000_000_000.0
-                    self.limitGBText = String(format: "%.1f", gb)
-                    self.sliderPosition = self.gbToSliderPosition(gb)
+                    if let limit = profile.quota.finiteBytes {
+                        let gb = Double(limit.rawValue) / 1_000_000_000.0
+                        self.limitGBText = String(format: "%.1f", gb)
+                        self.sliderPosition = self.gbToSliderPosition(gb)
+                    } else {
+                        self.isUnlimited = true
+                        self.limitGBText = newLoc.unlimitedLabel
+                        self.sliderPosition = 7.0
+                    }
                     self.resetDay = Int(profile.resetDay)
                     self.alias = profile.aliasNFC
                 }
             } else {
                 if let profileID = self.editingProfileID,
                    let profile = store.profiles.first(where: { $0.profileID == profileID }) {
-                    if profile.limitBytes.rawValue >= ProfileRecord.maximumLimitBytes {
+                    if profile.quota.isUnlimited {
                         self.isUnlimited = true
                         self.limitGBText = newLoc.unlimitedLabel
                         self.sliderPosition = 7.0
-                    } else {
-                        let gb = Double(profile.limitBytes.rawValue) / 1_000_000_000.0
+                    } else if let limit = profile.quota.finiteBytes {
+                        let gb = Double(limit.rawValue) / 1_000_000_000.0
                         self.isUnlimited = false
                         self.limitGBText = String(format: "%.1f", gb)
                         self.sliderPosition = self.gbToSliderPosition(gb)
                     }
                     self.resetDay = Int(profile.resetDay)
                     self.alias = profile.aliasNFC
-                } else if let limit = snapshot.currentLimitBytes {
-                    let gb = Double(limit.rawValue) / 1_000_000_000.0
-                    self.limitGBText = String(format: "%.1f", gb)
-                    self.sliderPosition = self.gbToSliderPosition(gb)
+                } else if let quota = snapshot.currentQuota {
+                    if let limit = quota.finiteBytes {
+                        let gb = Double(limit.rawValue) / 1_000_000_000.0
+                        self.limitGBText = String(format: "%.1f", gb)
+                        self.sliderPosition = self.gbToSliderPosition(gb)
+                    } else {
+                        self.isUnlimited = true
+                        self.limitGBText = newLoc.unlimitedLabel
+                        self.sliderPosition = 7.0
+                    }
                 }
                 if self.editingProfileID == nil,
                    let profileID = snapshot.selectedProfileID,
@@ -131,17 +143,17 @@ public final class SettingsState: ObservableObject {
     }
 
     public func saveProfile() {
-        let limitBytes: ByteCount
+        let quota: QuotaLimit
         let trimmed = limitGBText.trimmingCharacters(in: .whitespacesAndNewlines)
         if isUnlimited || trimmed == "무제한" || trimmed.lowercased() == "unlimited" {
-            limitBytes = ByteCount(ProfileRecord.maximumLimitBytes)
+            quota = .unlimited
         } else if let gb = Double(trimmed) {
             if gb <= 0 {
-                limitBytes = ByteCount(ProfileRecord.minimumLimitBytes)
+                quota = .finite(ByteCount(ProfileRecord.minimumLimitBytes))
             } else {
                 let calculated = UInt64(gb * 1_000_000_000.0)
                 let clamped = max(ProfileRecord.minimumLimitBytes, min(ProfileRecord.maximumLimitBytes, calculated))
-                limitBytes = ByteCount(clamped)
+                quota = .finite(ByteCount(clamped))
             }
         } else {
             return
@@ -158,7 +170,7 @@ public final class SettingsState: ObservableObject {
                 _ = try? await self.engine.editProfile(
                     profileID: targetProfile.profileID,
                     alias: self.alias.isEmpty ? self.localization.defaultHotspotAlias : self.alias,
-                    limitBytes: limitBytes,
+                    quota: quota,
                     resetDay: day
                 )
                 _ = try? await self.engine.performPeriodicTick()
@@ -169,7 +181,7 @@ public final class SettingsState: ObservableObject {
             } else if let identity = await self.engine.currentResolvedIdentity() {
                 _ = try? await self.engine.createOrUpdateProfile(
                     alias: self.alias.isEmpty ? self.localization.defaultHotspotAlias : self.alias,
-                    limitBytes: limitBytes,
+                    quota: quota,
                     resetDay: day,
                     interfaceName: identity.interfaceName,
                     ssidHex: identity.ssid.hex,

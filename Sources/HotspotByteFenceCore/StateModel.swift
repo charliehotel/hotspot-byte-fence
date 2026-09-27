@@ -52,7 +52,8 @@ public struct RuntimeSnapshotV1: Equatable, Sendable {
     public let selectedProfileAlias: String?
     public let isPauseBlockingActive: Bool
     public let currentUsageBytes: ByteCount?
-    public let currentLimitBytes: ByteCount?
+    public let currentQuota: QuotaLimit?
+    public var currentLimitBytes: ByteCount? { currentQuota?.finiteBytes }
     public let cycleID: CycleID?
     public let authorizationAvailable: Bool
     public let storeRevision: DecimalUInt64
@@ -72,6 +73,7 @@ public struct RuntimeSnapshotV1: Equatable, Sendable {
         selectedProfileAlias: String? = nil,
         isPauseBlockingActive: Bool = false,
         currentUsageBytes: ByteCount? = nil,
+        currentQuota: QuotaLimit? = nil,
         currentLimitBytes: ByteCount? = nil,
         cycleID: CycleID? = nil,
         authorizationAvailable: Bool = false,
@@ -91,7 +93,7 @@ public struct RuntimeSnapshotV1: Equatable, Sendable {
         self.selectedProfileAlias = selectedProfileAlias
         self.isPauseBlockingActive = isPauseBlockingActive
         self.currentUsageBytes = currentUsageBytes
-        self.currentLimitBytes = currentLimitBytes
+        self.currentQuota = currentQuota ?? currentLimitBytes.map(QuotaLimit.finite)
         self.cycleID = cycleID
         self.authorizationAvailable = authorizationAvailable
         self.storeRevision = storeRevision
@@ -132,7 +134,7 @@ public struct RuntimeSnapshotV1: Equatable, Sendable {
         if profile.protection.retry.state == .scheduled || profile.protection.retry.state == .running {
             return .blockingFailed
         }
-        if profile.protection.limitReached {
+        if profile.protection.limitReached && !profile.isUnlimited {
             return .limitReached
         }
         if candidateLifecycle == .operatorValidation {
