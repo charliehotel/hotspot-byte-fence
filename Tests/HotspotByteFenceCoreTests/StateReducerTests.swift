@@ -293,12 +293,12 @@ final class StateReducerTests: XCTestCase {
         XCTAssertTrue(effects4.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
     }
 
-    func testUnlimitedProfileCannotReachSentinelOrBlockWiFi() throws {
+    func testUnlimitedProfileCannotReachFormerMarkerOrBlockWiFi() throws {
         let initialState = try makeInitialState()
         let limit = ByteCount(ProfileRecord.maximumLimitBytes)
         let priorUsage = ByteCount(limit.rawValue - 50)
         let profile = try initialState.store.profiles[0].updating(
-            limitBytes: limit,
+            quota: .unlimited,
             measurement: MeasurementRecord.initial(usageBytes: priorUsage),
             protection: try initialState.store.profiles[0].protection.updating(limitReached: true)
         )
@@ -344,7 +344,7 @@ final class StateReducerTests: XCTestCase {
         )
         XCTAssertFalse(afterStaleEvent.store.profiles[0].protection.limitReached)
         XCTAssertFalse(staleEventEffects.contains(.disassociate(interfaceName: "en0")))
-        XCTAssertEqual(MenuBarUsageState.from(usageBytes: updatedProfile.measurement.usageBytes, limitBytes: limit), .normal)
+        XCTAssertEqual(MenuBarUsageState.from(usageBytes: updatedProfile.measurement.usageBytes, quota: .unlimited), .normal)
     }
 
     func testProfileManagementEvents() throws {
@@ -384,9 +384,9 @@ final class StateReducerTests: XCTestCase {
 
         let (limitState, limitEffects) = StateReducer.reduce(
             state: state,
-            event: .changeLimit(profileID: profileID, newLimitBytes: ByteCount(500_000_000))
+            event: .changeQuota(profileID: profileID, quota: .finite(ByteCount(500_000_000)))
         )
-        XCTAssertEqual(limitState.store.profiles.first { $0.profileID == profileID }?.limitBytes, ByteCount(500_000_000))
+        XCTAssertEqual(limitState.store.profiles.first { $0.profileID == profileID }?.quota, .finite(ByteCount(500_000_000)))
         XCTAssertTrue(limitEffects.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
 
         let editedAlias = "Other Profile"
@@ -395,13 +395,13 @@ final class StateReducerTests: XCTestCase {
             event: .editProfile(
                 profileID: profileID,
                 alias: editedAlias,
-                limitBytes: ByteCount(ProfileRecord.maximumLimitBytes),
+                quota: .unlimited,
                 resetDay: 21
             )
         )
         let editedProfile = editedState.store.profiles.first { $0.profileID == profileID }
         XCTAssertEqual(editedProfile?.aliasNFC, editedAlias)
-        XCTAssertEqual(editedProfile?.limitBytes.rawValue, ProfileRecord.maximumLimitBytes)
+        XCTAssertEqual(editedProfile?.quota, .unlimited)
         XCTAssertEqual(editedProfile?.resetDay, 21)
         XCTAssertTrue(editedEffects.contains(where: { if case .persistStore = $0 { return true } else { return false } }))
 
@@ -417,7 +417,7 @@ final class StateReducerTests: XCTestCase {
             event: .editProfile(
                 profileID: profileID,
                 alias: "Edited While Other Is Selected",
-                limitBytes: ByteCount(200_000_000),
+                quota: .finite(ByteCount(200_000_000)),
                 resetDay: 22
             )
         )
@@ -480,7 +480,7 @@ final class StateReducerTests: XCTestCase {
             state: state,
             event: .createOrUpdateProfile(
                 alias: "Edited Hotspot",
-                limitBytes: ByteCount(100_000_000),
+                quota: .finite(ByteCount(100_000_000)),
                 resetDay: 1,
                 interfaceName: "en0",
                 ssidHex: ssidHex,
@@ -497,7 +497,7 @@ final class StateReducerTests: XCTestCase {
             state: pausedState,
             event: .createOrUpdateProfile(
                 alias: "Edited Hotspot",
-                limitBytes: ByteCount(100_000_000),
+                quota: .finite(ByteCount(100_000_000)),
                 resetDay: 1,
                 interfaceName: "en0",
                 ssidHex: ssidHex,

@@ -7,9 +7,8 @@ public enum MenuBarUsageState: String, Equatable, Sendable {
     case critical
     case limitReached
 
-    public static func from(usageBytes: ByteCount, limitBytes: ByteCount) -> MenuBarUsageState {
-        guard limitBytes.rawValue > 0,
-              limitBytes.rawValue < ProfileRecord.maximumLimitBytes else { return .normal }
+    public static func from(usageBytes: ByteCount, quota: QuotaLimit) -> MenuBarUsageState {
+        guard let limitBytes = quota.finiteBytes, limitBytes.rawValue > 0 else { return .normal }
         let ratio = Double(usageBytes.rawValue) / Double(limitBytes.rawValue)
         if ratio >= 1.0 {
             return .limitReached
@@ -22,6 +21,10 @@ public enum MenuBarUsageState: String, Equatable, Sendable {
         } else {
             return .normal
         }
+    }
+
+    public static func from(usageBytes: ByteCount, limitBytes: ByteCount) -> MenuBarUsageState {
+        from(usageBytes: usageBytes, quota: .finite(limitBytes))
     }
 }
 
@@ -48,16 +51,20 @@ public struct MenuBarViewModel: Equatable, Sendable {
             self.displayTitle = Localization.formatMenuBar(usageBytes: usage, hasResolvedConnection: true)
             self.currentUsageText = UsageFormatter.formatGB(usage)
 
-            if let limit = snapshot.currentLimitBytes, limit.rawValue > 0 {
-                if limit.rawValue >= ProfileRecord.maximumLimitBytes {
+            if let quota = snapshot.currentQuota {
+                if quota.isUnlimited {
                     self.usageState = .normal
                     self.limitText = localization.effectiveLanguage == .korean ? "무제한 (∞)" : "Unlimited (∞)"
                     self.percentageText = nil
-                } else {
-                    self.usageState = MenuBarUsageState.from(usageBytes: usage, limitBytes: limit)
+                } else if let limit = quota.finiteBytes, limit.rawValue > 0 {
+                    self.usageState = MenuBarUsageState.from(usageBytes: usage, quota: quota)
                     self.limitText = Self.formatLimitGB(limit)
                     let ratio = Double(usage.rawValue) / Double(limit.rawValue) * 100.0
                     self.percentageText = String(format: "%.1f%%", ratio)
+                } else {
+                    self.usageState = .normal
+                    self.limitText = nil
+                    self.percentageText = nil
                 }
             } else {
                 self.usageState = .normal
@@ -72,11 +79,13 @@ public struct MenuBarViewModel: Equatable, Sendable {
             } else {
                 self.currentUsageText = Localization.disconnectedDash
             }
-            if let limit = snapshot.currentLimitBytes {
-                if limit.rawValue >= ProfileRecord.maximumLimitBytes {
+            if let quota = snapshot.currentQuota {
+                if quota.isUnlimited {
                     self.limitText = localization.effectiveLanguage == .korean ? "무제한 (∞)" : "Unlimited (∞)"
-                } else {
+                } else if let limit = quota.finiteBytes {
                     self.limitText = Self.formatLimitGB(limit)
+                } else {
+                    self.limitText = nil
                 }
             } else {
                 self.limitText = nil

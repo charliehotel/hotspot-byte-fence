@@ -279,7 +279,15 @@ public actor RuntimeEngine {
 
     @discardableResult
     public func changeLimit(profileID: UUID, newLimitBytes: ByteCount) async throws -> RuntimeSnapshotV1 {
-        try await handle(event: .changeLimit(profileID: profileID, newLimitBytes: newLimitBytes))
+        try await changeQuota(
+            profileID: profileID,
+            quota: QuotaLimit.fromLegacyLimitBytes(newLimitBytes)
+        )
+    }
+
+    @discardableResult
+    public func changeQuota(profileID: UUID, quota: QuotaLimit) async throws -> RuntimeSnapshotV1 {
+        try await handle(event: .changeQuota(profileID: profileID, quota: quota))
     }
 
     @discardableResult
@@ -291,9 +299,28 @@ public actor RuntimeEngine {
         ssidHex: String,
         bssid: BSSID
     ) async throws -> RuntimeSnapshotV1 {
+        try await createOrUpdateProfile(
+            alias: alias,
+            quota: QuotaLimit.fromLegacyLimitBytes(limitBytes),
+            resetDay: resetDay,
+            interfaceName: interfaceName,
+            ssidHex: ssidHex,
+            bssid: bssid
+        )
+    }
+
+    @discardableResult
+    public func createOrUpdateProfile(
+        alias: String,
+        quota: QuotaLimit,
+        resetDay: UInt,
+        interfaceName: String,
+        ssidHex: String,
+        bssid: BSSID
+    ) async throws -> RuntimeSnapshotV1 {
         try await handle(event: .createOrUpdateProfile(
             alias: alias,
-            limitBytes: limitBytes,
+            quota: quota,
             resetDay: resetDay,
             interfaceName: interfaceName,
             ssidHex: ssidHex,
@@ -303,11 +330,21 @@ public actor RuntimeEngine {
 
     @discardableResult
     public func editProfile(profileID: UUID, alias: String, limitBytes: ByteCount, resetDay: UInt) async throws -> RuntimeSnapshotV1 {
+        try await editProfile(
+            profileID: profileID,
+            alias: alias,
+            quota: QuotaLimit.fromLegacyLimitBytes(limitBytes),
+            resetDay: resetDay
+        )
+    }
+
+    @discardableResult
+    public func editProfile(profileID: UUID, alias: String, quota: QuotaLimit, resetDay: UInt) async throws -> RuntimeSnapshotV1 {
         guard let profile = state.store.profiles.first(where: { $0.profileID == profileID }) else {
             throw NSError(domain: "ProfileEditor", code: 1, userInfo: [NSLocalizedDescriptionKey: "Profile no longer exists"])
         }
-        _ = try profile.updating(aliasNFC: alias, limitBytes: limitBytes, resetDay: resetDay)
-        return try await handle(event: .editProfile(profileID: profileID, alias: alias, limitBytes: limitBytes, resetDay: resetDay))
+        _ = try profile.updating(aliasNFC: alias, quota: quota, resetDay: resetDay)
+        return try await handle(event: .editProfile(profileID: profileID, alias: alias, quota: quota, resetDay: resetDay))
     }
 
     @discardableResult

@@ -419,16 +419,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func setPresetLimit(_ sender: NSMenuItem) {
         guard let engine, let gb = sender.representedObject as? Double else { return }
-        let limitBytes = ByteCount(UInt64(gb * 1_000_000_000.0))
+        let quota = QuotaLimit.finite(ByteCount(UInt64(gb * 1_000_000_000.0)))
         Task {
             let snapshot = await engine.currentSnapshot()
             if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
-                _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
+                _ = try? await engine.changeQuota(profileID: profileID, quota: quota)
             } else if let identity = await engine.currentResolvedIdentity() {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
                 _ = try? await engine.createOrUpdateProfile(
                     alias: name,
-                    limitBytes: limitBytes,
+                    quota: quota,
                     resetDay: 1,
                     interfaceName: identity.interfaceName,
                     ssidHex: identity.ssid.hex,
@@ -443,16 +443,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func setUnlimitedLimit() {
         guard let engine else { return }
-        let limitBytes = ByteCount(ProfileRecord.maximumLimitBytes)
         Task {
             let snapshot = await engine.currentSnapshot()
             if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
-                _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
+                _ = try? await engine.changeQuota(profileID: profileID, quota: .unlimited)
             } else if let identity = await engine.currentResolvedIdentity() {
                 let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
                 _ = try? await engine.createOrUpdateProfile(
                     alias: name,
-                    limitBytes: limitBytes,
+                    quota: .unlimited,
                     resetDay: 1,
                     interfaceName: identity.interfaceName,
                     ssidHex: identity.ssid.hex,
@@ -479,17 +478,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             let text = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if let val = Double(text), val > 0 {
-                let limitBytes = ByteCount(UInt64(val * 1_000_000_000.0))
+                let quota = QuotaLimit.finite(ByteCount(UInt64(val * 1_000_000_000.0)))
                 guard let engine else { return }
                 Task {
                     let snapshot = await engine.currentSnapshot()
                     if let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID {
-                        _ = try? await engine.changeLimit(profileID: profileID, newLimitBytes: limitBytes)
+                        _ = try? await engine.changeQuota(profileID: profileID, quota: quota)
                     } else if let identity = await engine.currentResolvedIdentity() {
                         let name = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
                         _ = try? await engine.createOrUpdateProfile(
                             alias: name,
-                            limitBytes: limitBytes,
+                            quota: quota,
                             resetDay: 1,
                             interfaceName: identity.interfaceName,
                             ssidHex: identity.ssid.hex,
@@ -547,7 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let ssidStr = String(bytes: identity.ssid.bytes, encoding: .utf8) ?? identity.ssid.hex
             _ = try? await engine.createOrUpdateProfile(
                 alias: ssidStr,
-                limitBytes: ByteCount(10_000_000_000),
+                quota: .finite(ByteCount(10_000_000_000)),
                 resetDay: 1,
                 interfaceName: identity.interfaceName,
                 ssidHex: identity.ssid.hex,
@@ -832,8 +831,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store: StoreEnvelopeV1
     ) async {
         guard let usage = snapshot.currentUsageBytes,
-              let limit = snapshot.currentLimitBytes,
-              limit.rawValue > 0, limit.rawValue < ProfileRecord.maximumLimitBytes,
+              let quota = snapshot.currentQuota,
+              let limit = quota.finiteBytes,
+              limit.rawValue > 0,
               let profileID = snapshot.connectedProfileID ?? snapshot.selectedProfileID,
               let profile = store.profiles.first(where: { $0.profileID == profileID }) else {
             return

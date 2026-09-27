@@ -11,7 +11,8 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
     public let confirmedBSSIDs: [BSSID]
     public let isComplete: Bool
     public let sharesInterfaceSSID: Bool
-    public let limitBytes: ByteCount
+    public let quota: QuotaLimit
+    public var limitBytes: ByteCount? { quota.finiteBytes }
     public let resetDay: UInt
     public let cycle: CycleRecord
     public let measurement: MeasurementRecord
@@ -19,12 +20,11 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
 
-    public var isUnlimited: Bool {
-        limitBytes.rawValue >= Self.maximumLimitBytes
-    }
+    public var isUnlimited: Bool { quota.isUnlimited }
 
-    public static func hasReachedLimit(usageBytes: ByteCount, limitBytes: ByteCount) -> Bool {
-        limitBytes.rawValue < maximumLimitBytes && usageBytes.rawValue >= limitBytes.rawValue
+    public static func hasReachedLimit(usageBytes: ByteCount, quota: QuotaLimit) -> Bool {
+        guard let limitBytes = quota.finiteBytes else { return false }
+        return usageBytes.rawValue >= limitBytes.rawValue
     }
 
     public init(
@@ -35,7 +35,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         confirmedBSSIDs: [BSSID],
         isComplete: Bool,
         sharesInterfaceSSID: Bool,
-        limitBytes: ByteCount,
+        quota: QuotaLimit,
         resetDay: UInt,
         cycle: CycleRecord,
         measurement: MeasurementRecord,
@@ -75,8 +75,10 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         guard isComplete == identityComplete else {
             throw ProfileRecordValidationError.invalidCompletion
         }
-        guard ProfileRecord.minimumLimitBytes...ProfileRecord.maximumLimitBytes ~= limitBytes.rawValue else {
-            throw ProfileRecordValidationError.invalidLimit
+        if case let .finite(limitBytes) = quota {
+            guard ProfileRecord.minimumLimitBytes...ProfileRecord.maximumLimitBytes ~= limitBytes.rawValue else {
+                throw ProfileRecordValidationError.invalidLimit
+            }
         }
         guard (1...31).contains(resetDay) else {
             throw ProfileRecordValidationError.invalidResetDay
@@ -92,7 +94,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         self.confirmedBSSIDs = sortedBSSIDs
         self.isComplete = isComplete
         self.sharesInterfaceSSID = sharesInterfaceSSID
-        self.limitBytes = limitBytes
+        self.quota = quota
         self.resetDay = resetDay
         self.cycle = cycle
         self.measurement = measurement
@@ -101,9 +103,44 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
        self.updatedAt = updatedAt
    }
 
+    public init(
+        profileID: UUID,
+        aliasNFC: String,
+        ssidHex: String?,
+        interfaceName: String?,
+        confirmedBSSIDs: [BSSID],
+        isComplete: Bool,
+        sharesInterfaceSSID: Bool,
+        limitBytes: ByteCount,
+        resetDay: UInt,
+        cycle: CycleRecord,
+        measurement: MeasurementRecord,
+        protection: ProtectionRecord,
+        createdAt: Date,
+        updatedAt: Date
+    ) throws {
+        try self.init(
+            profileID: profileID,
+            aliasNFC: aliasNFC,
+            ssidHex: ssidHex,
+            interfaceName: interfaceName,
+            confirmedBSSIDs: confirmedBSSIDs,
+            isComplete: isComplete,
+            sharesInterfaceSSID: sharesInterfaceSSID,
+            quota: QuotaLimit.fromLegacyLimitBytes(limitBytes),
+            resetDay: resetDay,
+            cycle: cycle,
+            measurement: measurement,
+            protection: protection,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
     public func updating(
         aliasNFC: String? = nil,
         limitBytes: ByteCount? = nil,
+        quota: QuotaLimit? = nil,
         resetDay: UInt? = nil,
         confirmedBSSIDs: [BSSID]? = nil,
         cycle: CycleRecord? = nil,
@@ -119,7 +156,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
             confirmedBSSIDs: confirmedBSSIDs ?? self.confirmedBSSIDs,
             isComplete: self.isComplete,
             sharesInterfaceSSID: self.sharesInterfaceSSID,
-            limitBytes: limitBytes ?? self.limitBytes,
+            quota: quota ?? limitBytes.map(QuotaLimit.fromLegacyLimitBytes) ?? self.quota,
             resetDay: resetDay ?? self.resetDay,
             cycle: cycle ?? self.cycle,
             measurement: measurement ?? self.measurement,
@@ -134,6 +171,14 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         guard container.contains(.ssidHex), container.contains(.interfaceName) else {
             throw ProfileRecordValidationError.invalidIdentity
         }
+        let quota: QuotaLimit
+        if container.contains(.quota) {
+            quota = try container.decode(QuotaLimit.self, forKey: .quota)
+        } else {
+            quota = QuotaLimit.fromLegacyLimitBytes(
+                try container.decode(ByteCount.self, forKey: .limitBytes)
+            )
+        }
         try self.init(
             profileID: container.decode(UUID.self, forKey: .profileID),
             aliasNFC: container.decode(String.self, forKey: .aliasNFC),
@@ -142,7 +187,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
             confirmedBSSIDs: container.decode([BSSID].self, forKey: .confirmedBSSIDs),
             isComplete: container.decode(Bool.self, forKey: .isComplete),
             sharesInterfaceSSID: container.decode(Bool.self, forKey: .sharesInterfaceSSID),
-            limitBytes: container.decode(ByteCount.self, forKey: .limitBytes),
+            quota: quota,
             resetDay: container.decode(UInt.self, forKey: .resetDay),
             cycle: container.decode(CycleRecord.self, forKey: .cycle),
             measurement: container.decode(MeasurementRecord.self, forKey: .measurement),
@@ -161,7 +206,9 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         try container.encode(confirmedBSSIDs, forKey: .confirmedBSSIDs)
         try container.encode(isComplete, forKey: .isComplete)
         try container.encode(sharesInterfaceSSID, forKey: .sharesInterfaceSSID)
-        try container.encode(limitBytes, forKey: .limitBytes)
+        try container.encode(quota, forKey: .quota)
+        // Preserve the v0.1.2 field for older app builds during update.
+        try container.encode(quota.legacyLimitBytes, forKey: .limitBytes)
         try container.encode(resetDay, forKey: .resetDay)
         try container.encode(cycle, forKey: .cycle)
         try container.encode(measurement, forKey: .measurement)
@@ -178,6 +225,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         case confirmedBSSIDs
         case isComplete
         case sharesInterfaceSSID
+        case quota
         case limitBytes
         case resetDay
         case cycle
